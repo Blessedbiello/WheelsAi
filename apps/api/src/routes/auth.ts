@@ -1,0 +1,366 @@
+import { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
+
+import {
+  hashPassword,
+  verifyPassword,
+  createUser,
+  findUserByEmail,
+  findUserByWallet,
+  findOrCreateUserByWallet,
+  generateNonce,
+  getNonce,
+  consumeNonce,
+  verifySolanaSignature,
+  generateApiKey,
+  listApiKeys,
+  revokeApiKey,
+  type JwtPayload,
+} from "../services/auth.js";
+import {
+  requireAuth,
+  requireJwtAuth,
+  generateTokens,
+  setAuthCookie,
+  clearAuthCookie,
+} from "../middleware/auth.js";
+import { createLogger } from "../utils/logger.js";
+
+const logger = createLogger("auth-routes");
+
+// ============================================
+// Schemas
+// ============================================
+
+const registerSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+});
+
+const walletNonceSchema = z.object({
+  walletAddress: z.string().min(32).max(44),
+});
+
+const walletVerifySchema = z.object({
+  walletAddress: z.string().min(32).max(44),
+  signature: z.string(),
+  nonce: z.string(),
+});
+
+const createApiKeySchema = z.object({
+  name: z.string().max(100).optional(),
+  scopes: z.array(z.string()).default([]),
+});
+
+// ============================================
+// Routes
+// ============================================
+
+export const authRoutes: FastifyPluginAsync = async (app) => {
+  // ==========================================
+  // Email/Password Authentication
+  // ==========================================
+
+  /**
+   * Register new user with email/password
+   */
+  app.post("/register", async (request, reply) => {
+    const body = registerSchema.parse(request.body);
+
+    // Check if email already exists
+    const existingUser = await findUserByEmail(body.email);
+    if (existingUser) {
+      return reply.status(409).send({
+        error: "Conflict",
+        message: "Email already registered",
+      });
+    }
+
+    // Create user with organization
+    const { user, org } = await createUser({
+      email: body.email,
+      password: body.password,
+    });
+
+    // Generate JWT
+    const payload: JwtPayload = {
+      userId: user.id,
+      orgId: org.id,
+      email: user.email ?? undefined,
+    };
+
+    const { accessToken } = generateTokens(app, payload);
+
+    // Set cookie
+    setAuthCookie(reply, accessToken);
+
+    logger.info({ userId: user.id }, "User registered via email");
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+      organization: {
+        id: org.id,
+        name: org.name,
+      },
+      token: accessToken,
+    };
+  });
+
+  /**
+   * Login with email/password
+   */
+  app.post("/login", async (request, reply) => {
+    const body = loginSchema.parse(request.body);
+
+    // Find user
+    const user = await findUserByEmail(body.email);
+    if (!user || !user.passwordHash) {
+      return reply.status(401).send({
+        error: "Unauthorized",
+        message: "Invalid email or password",
+      });
+    }
+
+    // Verify password
+    const valid = await verifyPassword(user.passwordHash, body.password);
+    if (!valid) {
+      return reply.status(401).send({
+        error: "Unauthorized",
+        message: "Invalid email or password",
+      });
+    }
+
+    // Get primary organization
+    const primaryMembership = user.memberships.find((m) => m.role === "owner");
+    if (!primaryMembership) {
+      return reply.status(500).send({
+        error: "Internal Error",
+        message: "User has no organization",
+      });
+    }
+
+    // Generate JWT
+    const payload: JwtPayload = {
+      userId: user.id,
+      orgId: primaryMembership.org.id,
+      email: user.email ?? undefined,
+    };
+
+    const { accessToken } = generateTokens(app, payload);
+
+    // Set cookie
+    setAuthCookie(reply, accessToken);
+
+    logger.info({ userId: user.id }, "User logged in via email");
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+      organization: {
+        id: primaryMembership.org.id,
+        name: primaryMembership.org.name,
+      },
+      token: accessToken,
+    };
+  });
+
+  // ==========================================
+  // Wallet Authentication
+  // ==========================================
+
+  /**
+   * Get nonce for wallet signature
+   */
+  app.post("/wallet/nonce", async (request, reply) => {
+    const { walletAddress } = walletNonceSchema.parse(request.body);
+
+    const nonce = generateNonce(walletAddress);
+
+    return { nonce, walletAddress };
+  });
+
+  /**
+   * Verify wallet signature and authenticate
+   */
+  app.post("/wallet/verify", async (request, reply) => {
+    const { walletAddress, signature, nonce } = walletVerifySchema.parse(
+      request.body
+    );
+
+    // Verify the nonce matches
+    const storedNonce = getNonce(walletAddress);
+    if (!storedNonce || storedNonce !== nonce) {
+      return reply.status(401).send({
+        error: "Unauthorized",
+        message: "Invalid or expired nonce",
+      });
+    }
+
+    // Verify the signature
+    const isValid = verifySolanaSignature(nonce, signature, walletAddress);
+    if (!isValid) {
+      return reply.status(401).send({
+        error: "Unauthorized",
+        message: "Invalid signature",
+      });
+    }
+
+    // Consume the nonce (one-time use)
+    consumeNonce(walletAddress);
+
+    // Find or create user
+    const user = await findOrCreateUserByWallet(walletAddress);
+    if (!user) {
+      return reply.status(500).send({
+        error: "Internal Error",
+        message: "Failed to create user",
+      });
+    }
+
+    // Get primary organization
+    const primaryMembership = user.memberships.find((m) => m.role === "owner");
+    if (!primaryMembership) {
+      return reply.status(500).send({
+        error: "Internal Error",
+        message: "User has no organization",
+      });
+    }
+
+    // Generate JWT
+    const payload: JwtPayload = {
+      userId: user.id,
+      orgId: primaryMembership.org.id,
+      walletAddress: user.walletAddress ?? undefined,
+    };
+
+    const { accessToken } = generateTokens(app, payload);
+
+    // Set cookie
+    setAuthCookie(reply, accessToken);
+
+    logger.info({ userId: user.id, walletAddress }, "User authenticated via wallet");
+
+    return {
+      user: {
+        id: user.id,
+        walletAddress: user.walletAddress,
+        createdAt: user.createdAt,
+      },
+      organization: {
+        id: primaryMembership.org.id,
+        name: primaryMembership.org.name,
+      },
+      token: accessToken,
+    };
+  });
+
+  // ==========================================
+  // Session Management
+  // ==========================================
+
+  /**
+   * Logout - clear session
+   */
+  app.post("/logout", async (request, reply) => {
+    clearAuthCookie(reply);
+    return { message: "Logged out successfully" };
+  });
+
+  /**
+   * Get current user
+   */
+  app.get("/me", { preHandler: [requireAuth] }, async (request, reply) => {
+    const { userId, orgId, email, walletAddress } = request.auth!;
+
+    return {
+      user: {
+        id: userId,
+        email,
+        walletAddress,
+      },
+      organization: {
+        id: orgId,
+      },
+      authType: request.auth!.type,
+    };
+  });
+
+  /**
+   * Refresh token
+   */
+  app.post("/refresh", { preHandler: [requireJwtAuth] }, async (request, reply) => {
+    const { userId, orgId, email, walletAddress } = request.auth!;
+
+    const payload: JwtPayload = {
+      userId,
+      orgId,
+      email,
+      walletAddress,
+    };
+
+    const { accessToken } = generateTokens(app, payload);
+    setAuthCookie(reply, accessToken);
+
+    return { token: accessToken };
+  });
+
+  // ==========================================
+  // API Key Management
+  // ==========================================
+
+  /**
+   * List API keys
+   */
+  app.get("/keys", { preHandler: [requireJwtAuth] }, async (request, reply) => {
+    const { orgId } = request.auth!;
+    const keys = await listApiKeys(orgId);
+    return { keys };
+  });
+
+  /**
+   * Create API key
+   */
+  app.post("/keys", { preHandler: [requireJwtAuth] }, async (request, reply) => {
+    const { orgId } = request.auth!;
+    const body = createApiKeySchema.parse(request.body);
+
+    const { key, keyId } = await generateApiKey(orgId, body.name, body.scopes);
+
+    logger.info({ orgId, keyId }, "API key created");
+
+    reply.status(201);
+    return {
+      id: keyId,
+      key, // Only returned once!
+      message: "Store this key securely - it cannot be retrieved again",
+    };
+  });
+
+  /**
+   * Revoke API key
+   */
+  app.delete(
+    "/keys/:keyId",
+    { preHandler: [requireJwtAuth] },
+    async (request, reply) => {
+      const { orgId } = request.auth!;
+      const { keyId } = z.object({ keyId: z.string() }).parse(request.params);
+
+      await revokeApiKey(keyId, orgId);
+
+      return { message: "API key revoked" };
+    }
+  );
+};

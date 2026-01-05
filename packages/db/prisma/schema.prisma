@@ -1,0 +1,477 @@
+// WheelsAI Database Schema
+// PostgreSQL with Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Users and Authentication
+// ============================================
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String?   @unique
+  passwordHash  String?   @map("password_hash")
+  walletAddress String?   @unique @map("wallet_address")
+  displayName   String?   @map("display_name")
+  emailVerified Boolean   @default(false) @map("email_verified")
+  metadata      Json?     @default("{}")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  ownedOrganizations Organization[] @relation("OrgOwner")
+  memberships        OrgMember[]
+
+  @@map("users")
+}
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  ownerId   String   @map("owner_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  owner         User            @relation("OrgOwner", fields: [ownerId], references: [id])
+  members       OrgMember[]
+  apiKeys       ApiKey[]
+  deployments   Deployment[]
+  agents        Agent[]
+  trainingJobs  TrainingJob[]
+  datasets      Dataset[]
+  creditBalance CreditBalance?
+  transactions  CreditTransaction[]
+  usageRecords  UsageRecord[]
+  agentWallets  AgentWallet[]
+  x402Payments  X402Payment[]
+
+  @@map("organizations")
+}
+
+model OrgMember {
+  orgId  String @map("org_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  role   String // 'owner', 'admin', 'member'
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([orgId, userId])
+  @@map("org_members")
+}
+
+// ============================================
+// API Keys
+// ============================================
+
+model ApiKey {
+  id         String    @id @default(uuid()) @db.Uuid
+  orgId      String    @map("org_id") @db.Uuid
+  keyHash    String    @unique @map("key_hash")
+  keyPrefix  String    @map("key_prefix") // First 8 chars for display
+  name       String?
+  scopes     String[]  @default([])
+  lastUsedAt DateTime? @map("last_used_at")
+  expiresAt  DateTime? @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+// ============================================
+// Model Catalog
+// ============================================
+
+model Model {
+  id               String   @id // e.g., "llama-3.1-8b"
+  hfId             String   @map("hf_id") // HuggingFace model ID
+  displayName      String   @map("display_name")
+  description      String?
+  parameters       BigInt? // 8B, 70B, etc.
+  minGpuTier       String   @map("min_gpu_tier")
+  supportedEngines String[] @map("supported_engines")
+  defaultEngine    String   @map("default_engine")
+  contextLength    Int      @map("context_length")
+  license          String?
+  tags             String[] @default([])
+  pricingTier      String   @map("pricing_tier") // 'small', 'medium', 'large'
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  deployments Deployment[]
+
+  @@map("models")
+}
+
+// ============================================
+// Deployments
+// ============================================
+
+model Deployment {
+  id           String    @id @default(uuid()) @db.Uuid
+  orgId        String    @map("org_id") @db.Uuid
+  name         String
+  slug         String
+  modelId      String    @map("model_id")
+  engine       String
+  gpuTier      String    @map("gpu_tier")
+  replicas     Int       @default(1)
+  config       Json
+  status       String    // 'pending', 'provisioning', 'running', 'degraded', 'stopped', 'failed'
+  nosanaJobIds String[]  @map("nosana_job_ids")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  stoppedAt    DateTime? @map("stopped_at")
+
+  org          Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  model        Model            @relation(fields: [modelId], references: [id])
+  nodes        DeploymentNode[]
+  usageRecords UsageRecord[]
+  agentWallet  AgentWallet?
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+  @@index([status])
+  @@map("deployments")
+}
+
+model DeploymentNode {
+  id              String    @id @default(uuid()) @db.Uuid
+  deploymentId    String    @map("deployment_id") @db.Uuid
+  nosanaNodeId    String    @map("nosana_node_id")
+  nodeUrl         String    @map("node_url")
+  healthStatus    String    @default("unknown") @map("health_status")
+  lastHealthCheck DateTime? @map("last_health_check")
+  latencyMs       Int?      @map("latency_ms")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentId])
+  @@map("deployment_nodes")
+}
+
+// ============================================
+// Billing and Credits
+// ============================================
+
+model CreditBalance {
+  orgId       String   @id @map("org_id") @db.Uuid
+  balanceCents BigInt  @default(0) @map("balance_cents")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("credit_balances")
+}
+
+model CreditTransaction {
+  id           String   @id @default(uuid()) @db.Uuid
+  orgId        String   @map("org_id") @db.Uuid
+  amountCents  BigInt   @map("amount_cents") // Positive = credit, negative = debit
+  type         String   // 'purchase', 'usage', 'refund', 'adjustment', 'bonus'
+  description  String?
+  referenceId  String?  @map("reference_id") // Stripe charge ID, usage period, etc.
+  balanceAfter BigInt   @map("balance_after")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@map("credit_transactions")
+}
+
+// ============================================
+// Usage Tracking
+// ============================================
+
+model UsageRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  deploymentId  String   @map("deployment_id") @db.Uuid
+  periodStart   DateTime @map("period_start")
+  periodEnd     DateTime @map("period_end")
+  requestCount  Int      @default(0) @map("request_count")
+  inputTokens   BigInt   @default(0) @map("input_tokens")
+  outputTokens  BigInt   @default(0) @map("output_tokens")
+  totalLatencyMs BigInt  @default(0) @map("total_latency_ms")
+  errorCount    Int      @default(0) @map("error_count")
+  costCents     BigInt   @default(0) @map("cost_cents")
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deployment Deployment   @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, deploymentId, periodStart])
+  @@index([orgId, periodStart])
+  @@map("usage_records")
+}
+
+// ============================================
+// Agent Wallets (Phase 2)
+// ============================================
+
+model AgentWallet {
+  id              String  @id @default(uuid()) @db.Uuid
+  orgId           String  @map("org_id") @db.Uuid
+  deploymentId    String  @unique @map("deployment_id") @db.Uuid
+  walletAddress   String  @unique @map("wallet_address")
+  encryptedKey    Bytes   @map("encrypted_key")
+  keyVersion      Int     @default(1) @map("key_version")
+  dailyLimitCents BigInt? @map("daily_limit_cents")
+  perTxLimitCents BigInt? @map("per_tx_limit_cents")
+  allowedDomains  String[] @default([]) @map("allowed_domains")
+  isActive        Boolean @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  org          Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deployment   Deployment         @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  transactions AgentTransaction[]
+
+  @@map("agent_wallets")
+}
+
+model AgentTransaction {
+  id            String   @id @default(uuid()) @db.Uuid
+  walletId      String   @map("wallet_id") @db.Uuid
+  direction     String   // 'in', 'out'
+  amountLamports BigInt  @map("amount_lamports")
+  token         String   // 'SOL', 'USDC', 'NOS'
+  counterparty  String
+  txSignature   String?  @unique @map("tx_signature")
+  status        String   @default("pending")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  wallet AgentWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@map("agent_transactions")
+}
+
+// ============================================
+// Agents (Phase 2)
+// ============================================
+
+model Agent {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  name          String
+  slug          String
+  description   String?
+  framework     String   // 'mastra', 'langchain', 'autogen', 'custom'
+
+  // Agent configuration
+  systemPrompt  String?  @map("system_prompt") @db.Text
+  tools         Json     @default("[]") // Array of tool configurations
+  modelConfig   Json     @map("model_config") // Model to use, temperature, etc.
+
+  // Source code / definition
+  sourceType    String   @map("source_type") // 'inline', 'github', 'ipfs'
+  sourceUrl     String?  @map("source_url") // GitHub repo URL or IPFS hash
+  sourceCode    String?  @map("source_code") @db.Text // Inline code if sourceType = 'inline'
+
+  // Runtime configuration
+  env           Json     @default("{}") // Environment variables (encrypted sensitive values)
+  secrets       Bytes?   // Encrypted secrets blob
+
+  // Metadata
+  version       String   @default("1.0.0")
+  isPublic      Boolean  @default(false) @map("is_public")
+  tags          String[] @default([])
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  org           Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deployments   AgentDeployment[]
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+  @@map("agents")
+}
+
+model AgentDeployment {
+  id            String   @id @default(uuid()) @db.Uuid
+  agentId       String   @map("agent_id") @db.Uuid
+
+  // Deployment configuration
+  gpuTier       String   @map("gpu_tier")
+  replicas      Int      @default(1)
+
+  // Model deployment reference (if using dedicated model)
+  modelDeploymentId String? @map("model_deployment_id") @db.Uuid
+
+  // External model endpoint (if using external API)
+  externalModelUrl  String? @map("external_model_url")
+  externalModelKey  Bytes?  @map("external_model_key") // Encrypted
+
+  // Status
+  status        String   @default("pending") // 'pending', 'building', 'deploying', 'running', 'stopped', 'failed'
+  endpoint      String?  // Public endpoint URL
+  nosanaJobIds  String[] @map("nosana_job_ids")
+
+  // Wallet for autonomous payments
+  walletId      String?  @unique @map("wallet_id") @db.Uuid
+
+  // Logs and metrics
+  buildLogs     String?  @map("build_logs") @db.Text
+  lastError     String?  @map("last_error")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  stoppedAt     DateTime? @map("stopped_at")
+
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@map("agent_deployments")
+}
+
+// ============================================
+// Training Studio (Phase 2)
+// ============================================
+
+model Dataset {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  name          String
+  description   String?
+
+  // Storage
+  storageType   String   @map("storage_type") // 's3', 'ipfs', 'huggingface'
+  storageUrl    String   @map("storage_url")
+
+  // Metadata
+  format        String   // 'jsonl', 'csv', 'parquet', 'alpaca', 'sharegpt'
+  sizeBytes     BigInt   @map("size_bytes")
+  rowCount      Int      @map("row_count")
+
+  // Validation
+  isValidated   Boolean  @default(false) @map("is_validated")
+  validationErrors Json? @map("validation_errors")
+
+  // Sample data for preview
+  sampleRows    Json?    @map("sample_rows")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  org           Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  trainingJobs  TrainingJob[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("datasets")
+}
+
+model TrainingJob {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  name          String
+
+  // Base model
+  baseModelId   String   @map("base_model_id")
+  baseModelHfId String   @map("base_model_hf_id")
+
+  // Dataset
+  datasetId     String   @map("dataset_id") @db.Uuid
+
+  // Training method
+  method        String   // 'lora', 'qlora', 'full' (full only for small models)
+
+  // Hyperparameters
+  config        Json     // epochs, learning_rate, batch_size, lora_r, lora_alpha, etc.
+
+  // GPU requirements
+  gpuTier       String   @map("gpu_tier")
+  gpuCount      Int      @default(1) @map("gpu_count")
+
+  // Status
+  status        String   @default("pending") // 'pending', 'queued', 'running', 'completed', 'failed', 'cancelled'
+  progress      Int      @default(0) // 0-100
+  currentEpoch  Int?     @map("current_epoch")
+  totalEpochs   Int?     @map("total_epochs")
+
+  // Nosana integration
+  nosanaJobId   String?  @map("nosana_job_id")
+
+  // Output
+  outputModelId String?  @map("output_model_id") // Reference to created Model entry
+  outputPath    String?  @map("output_path") // S3/IPFS path to adapter weights
+
+  // Metrics
+  trainingLoss  Float?   @map("training_loss")
+  evalLoss      Float?   @map("eval_loss")
+  metrics       Json?    // Full training metrics history
+
+  // Logs
+  logs          String?  @db.Text
+  lastError     String?  @map("last_error")
+
+  // Cost tracking
+  estimatedCostCents BigInt? @map("estimated_cost_cents")
+  actualCostCents    BigInt? @map("actual_cost_cents")
+
+  // Timestamps
+  startedAt     DateTime? @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  dataset       Dataset      @relation(fields: [datasetId], references: [id])
+
+  @@index([orgId])
+  @@index([status])
+  @@map("training_jobs")
+}
+
+// ============================================
+// X-402 Payments (Phase 2)
+// ============================================
+
+model X402Payment {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+
+  // Request context
+  deploymentId  String?  @map("deployment_id") @db.Uuid
+  agentDeploymentId String? @map("agent_deployment_id") @db.Uuid
+  requestId     String   @map("request_id") // Correlation ID
+
+  // Payment details
+  network       String   // 'solana:mainnet', 'solana:devnet'
+  asset         String   // 'USDC', 'SOL', 'NOS'
+  amountRaw     String   @map("amount_raw") // Raw amount as string (to handle big numbers)
+  amountUsd     Float    @map("amount_usd") // USD equivalent at time of payment
+
+  // Transaction
+  payerAddress  String   @map("payer_address")
+  payeeAddress  String   @map("payee_address")
+  txSignature   String?  @unique @map("tx_signature")
+
+  // Status
+  status        String   @default("pending") // 'pending', 'verified', 'settled', 'failed', 'refunded'
+  verifiedAt    DateTime? @map("verified_at")
+  settledAt     DateTime? @map("settled_at")
+
+  // Error handling
+  failureReason String?  @map("failure_reason")
+  retryCount    Int      @default(0) @map("retry_count")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([txSignature])
+  @@index([status])
+  @@map("x402_payments")
+}

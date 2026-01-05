@@ -1,0 +1,525 @@
+import { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
+
+import { requireAuth } from "../middleware/auth.js";
+import { createLogger } from "../utils/logger.js";
+import { prisma } from "@wheelsai/db";
+import { generateAgentJobDefinition } from "../services/agent-runtime.js";
+import { getNosanaClient } from "../services/nosana.js";
+
+const logger = createLogger("agent-routes");
+
+// ============================================
+// Schemas
+// ============================================
+
+const toolSchema = z.object({
+  name: z.string(),
+  type: z.enum(["function", "api", "mcp"]),
+  description: z.string().optional(),
+  config: z.record(z.any()).optional(),
+});
+
+const createAgentSchema = z.object({
+  name: z.string().min(3).max(100),
+  description: z.string().max(500).optional(),
+  framework: z.enum(["mastra", "langchain", "autogen", "custom"]),
+  systemPrompt: z.string().max(10000).optional(),
+  tools: z.array(toolSchema).default([]),
+  modelConfig: z.object({
+    modelId: z.string().optional(), // WheelsAI model ID
+    externalModel: z.string().optional(), // e.g., "openai/gpt-4"
+    temperature: z.number().min(0).max(2).default(0.7),
+    maxTokens: z.number().int().min(1).max(32768).default(4096),
+  }),
+  sourceType: z.enum(["inline", "github", "ipfs"]),
+  sourceUrl: z.string().url().optional(),
+  sourceCode: z.string().max(100000).optional(),
+  env: z.record(z.string()).default({}),
+  tags: z.array(z.string()).default([]),
+  isPublic: z.boolean().default(false),
+});
+
+const updateAgentSchema = createAgentSchema.partial();
+
+const deployAgentSchema = z.object({
+  gpuTier: z.string(),
+  replicas: z.number().int().min(1).max(5).default(1),
+  modelDeploymentId: z.string().uuid().optional(),
+  externalModelUrl: z.string().url().optional(),
+  enableWallet: z.boolean().default(false),
+  walletConfig: z.object({
+    dailyLimitCents: z.number().int().min(0).optional(),
+    perTxLimitCents: z.number().int().min(0).optional(),
+    allowedDomains: z.array(z.string()).default([]),
+  }).optional(),
+});
+
+// ============================================
+// Routes
+// ============================================
+
+export const agentRoutes: FastifyPluginAsync = async (app) => {
+  /**
+   * List all agents
+   */
+  app.get("/", { preHandler: [requireAuth] }, async (request) => {
+    const { orgId } = request.auth!;
+
+    const agents = await prisma.agent.findMany({
+      where: { orgId },
+      include: {
+        deployments: {
+          select: {
+            id: true,
+            status: true,
+            endpoint: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      agents: agents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        slug: agent.slug,
+        description: agent.description,
+        framework: agent.framework,
+        version: agent.version,
+        tags: agent.tags,
+        isPublic: agent.isPublic,
+        latestDeployment: agent.deployments[0] || null,
+        createdAt: agent.createdAt,
+        updatedAt: agent.updatedAt,
+      })),
+      total: agents.length,
+    };
+  });
+
+  /**
+   * Get single agent
+   */
+  app.get("/:agentId", { preHandler: [requireAuth] }, async (request, reply) => {
+    const { orgId } = request.auth!;
+    const { agentId } = z.object({ agentId: z.string().uuid() }).parse(request.params);
+
+    const agent = await prisma.agent.findFirst({
+      where: { id: agentId, orgId },
+      include: {
+        deployments: {
+          orderBy: { createdAt: "desc" },
+        },
+      },
+    });
+
+    if (!agent) {
+      return reply.notFound("Agent not found");
+    }
+
+    return {
+      agent: {
+        ...agent,
+        // Don't expose secrets
+        secrets: undefined,
+      },
+    };
+  });
+
+  /**
+   * Create new agent
+   */
+  app.post("/", { preHandler: [requireAuth] }, async (request, reply) => {
+    const { orgId } = request.auth!;
+    const body = createAgentSchema.parse(request.body);
+
+    // Validate source
+    if (body.sourceType === "inline" && !body.sourceCode) {
+      return reply.badRequest("Source code is required for inline agents");
+    }
+    if ((body.sourceType === "github" || body.sourceType === "ipfs") && !body.sourceUrl) {
+      return reply.badRequest("Source URL is required for github/ipfs agents");
+    }
+
+    // Generate slug
+    const baseSlug = body.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+
+    let slug = baseSlug;
+    let counter = 0;
+    while (await prisma.agent.findUnique({ where: { orgId_slug: { orgId, slug } } })) {
+      counter++;
+      slug = `${baseSlug}-${counter}`;
+    }
+
+    const agent = await prisma.agent.create({
+      data: {
+        orgId,
+        name: body.name,
+        slug,
+        description: body.description,
+        framework: body.framework,
+        systemPrompt: body.systemPrompt,
+        tools: body.tools,
+        modelConfig: body.modelConfig,
+        sourceType: body.sourceType,
+        sourceUrl: body.sourceUrl,
+        sourceCode: body.sourceCode,
+        env: body.env,
+        tags: body.tags,
+        isPublic: body.isPublic,
+      },
+    });
+
+    logger.info({ agentId: agent.id, orgId }, "Agent created");
+
+    reply.status(201);
+    return {
+      agent: {
+        id: agent.id,
+        name: agent.name,
+        slug: agent.slug,
+        framework: agent.framework,
+      },
+      message: "Agent created successfully",
+    };
+  });
+
+  /**
+   * Update agent
+   */
+  app.patch("/:agentId", { preHandler: [requireAuth] }, async (request, reply) => {
+    const { orgId } = request.auth!;
+    const { agentId } = z.object({ agentId: z.string().uuid() }).parse(request.params);
+    const updates = updateAgentSchema.parse(request.body);
+
+    const agent = await prisma.agent.findFirst({
+      where: { id: agentId, orgId },
+    });
+
+    if (!agent) {
+      return reply.notFound("Agent not found");
+    }
+
+    // Increment version on significant changes
+    let newVersion = agent.version;
+    if (updates.sourceCode || updates.sourceUrl || updates.systemPrompt || updates.tools) {
+      const [major, minor, patch] = agent.version.split(".").map(Number);
+      newVersion = `${major}.${minor}.${patch + 1}`;
+    }
+
+    const updatedAgent = await prisma.agent.update({
+      where: { id: agentId },
+      data: {
+        ...updates,
+        version: newVersion,
+        modelConfig: updates.modelConfig
+          ? { ...(agent.modelConfig as any), ...updates.modelConfig }
+          : undefined,
+      },
+    });
+
+    return { agent: updatedAgent };
+  });
+
+  /**
+   * Delete agent
+   */
+  app.delete("/:agentId", { preHandler: [requireAuth] }, async (request, reply) => {
+    const { orgId } = request.auth!;
+    const { agentId } = z.object({ agentId: z.string().uuid() }).parse(request.params);
+
+    const agent = await prisma.agent.findFirst({
+      where: { id: agentId, orgId },
+      include: { deployments: true },
+    });
+
+    if (!agent) {
+      return reply.notFound("Agent not found");
+    }
+
+    // Stop any running deployments
+    const runningDeployments = agent.deployments.filter((d) => d.status === "running");
+    if (runningDeployments.length > 0) {
+      const nosana = await getNosanaClient();
+      for (const deployment of runningDeployments) {
+        for (const jobId of deployment.nosanaJobIds) {
+          await nosana.stopDeployment(jobId).catch((err) => {
+            logger.error({ err, jobId }, "Failed to stop agent deployment");
+          });
+        }
+      }
+    }
+
+    await prisma.agent.delete({ where: { id: agentId } });
+
+    logger.info({ agentId, orgId }, "Agent deleted");
+
+    return { message: "Agent deleted" };
+  });
+
+  /**
+   * Deploy agent
+   */
+  app.post("/:agentId/deploy", { preHandler: [requireAuth] }, async (request, reply) => {
+    const { orgId } = request.auth!;
+    const { agentId } = z.object({ agentId: z.string().uuid() }).parse(request.params);
+    const body = deployAgentSchema.parse(request.body);
+
+    const agent = await prisma.agent.findFirst({
+      where: { id: agentId, orgId },
+    });
+
+    if (!agent) {
+      return reply.notFound("Agent not found");
+    }
+
+    // Validate model configuration
+    const modelConfig = agent.modelConfig as any;
+    if (!body.modelDeploymentId && !body.externalModelUrl && !modelConfig.externalModel) {
+      return reply.badRequest(
+        "Either modelDeploymentId, externalModelUrl, or agent modelConfig.externalModel is required"
+      );
+    }
+
+    // If using internal model deployment, verify it exists and is running
+    if (body.modelDeploymentId) {
+      const modelDeployment = await prisma.deployment.findFirst({
+        where: { id: body.modelDeploymentId, orgId },
+      });
+      if (!modelDeployment) {
+        return reply.badRequest("Model deployment not found");
+      }
+      if (modelDeployment.status !== "running") {
+        return reply.badRequest("Model deployment is not running");
+      }
+    }
+
+    // Create agent deployment
+    const deployment = await prisma.agentDeployment.create({
+      data: {
+        agentId,
+        gpuTier: body.gpuTier,
+        replicas: body.replicas,
+        modelDeploymentId: body.modelDeploymentId,
+        externalModelUrl: body.externalModelUrl,
+        status: "pending",
+        nosanaJobIds: [],
+      },
+    });
+
+    logger.info({ agentId, deploymentId: deployment.id }, "Agent deployment created");
+
+    // Submit to Nosana asynchronously
+    submitAgentToNosana(deployment.id, agent, body).catch((err) => {
+      logger.error({ err, deploymentId: deployment.id }, "Failed to deploy agent");
+    });
+
+    reply.status(201);
+    return {
+      deployment: {
+        id: deployment.id,
+        status: deployment.status,
+      },
+      message: "Agent deployment started",
+    };
+  });
+
+  /**
+   * Get agent deployment status
+   */
+  app.get(
+    "/:agentId/deployments/:deploymentId",
+    { preHandler: [requireAuth] },
+    async (request, reply) => {
+      const { orgId } = request.auth!;
+      const { agentId, deploymentId } = z
+        .object({ agentId: z.string().uuid(), deploymentId: z.string().uuid() })
+        .parse(request.params);
+
+      const agent = await prisma.agent.findFirst({
+        where: { id: agentId, orgId },
+      });
+
+      if (!agent) {
+        return reply.notFound("Agent not found");
+      }
+
+      const deployment = await prisma.agentDeployment.findFirst({
+        where: { id: deploymentId, agentId },
+      });
+
+      if (!deployment) {
+        return reply.notFound("Deployment not found");
+      }
+
+      return { deployment };
+    }
+  );
+
+  /**
+   * Stop agent deployment
+   */
+  app.post(
+    "/:agentId/deployments/:deploymentId/stop",
+    { preHandler: [requireAuth] },
+    async (request, reply) => {
+      const { orgId } = request.auth!;
+      const { agentId, deploymentId } = z
+        .object({ agentId: z.string().uuid(), deploymentId: z.string().uuid() })
+        .parse(request.params);
+
+      const agent = await prisma.agent.findFirst({
+        where: { id: agentId, orgId },
+      });
+
+      if (!agent) {
+        return reply.notFound("Agent not found");
+      }
+
+      const deployment = await prisma.agentDeployment.findFirst({
+        where: { id: deploymentId, agentId },
+      });
+
+      if (!deployment) {
+        return reply.notFound("Deployment not found");
+      }
+
+      // Stop Nosana jobs
+      const nosana = await getNosanaClient();
+      for (const jobId of deployment.nosanaJobIds) {
+        await nosana.stopDeployment(jobId).catch((err) => {
+          logger.error({ err, jobId }, "Failed to stop Nosana job");
+        });
+      }
+
+      await prisma.agentDeployment.update({
+        where: { id: deploymentId },
+        data: {
+          status: "stopped",
+          stoppedAt: new Date(),
+        },
+      });
+
+      logger.info({ agentId, deploymentId }, "Agent deployment stopped");
+
+      return { message: "Deployment stopped" };
+    }
+  );
+
+  /**
+   * Get agent deployment logs
+   */
+  app.get(
+    "/:agentId/deployments/:deploymentId/logs",
+    { preHandler: [requireAuth] },
+    async (request, reply) => {
+      const { orgId } = request.auth!;
+      const { agentId, deploymentId } = z
+        .object({ agentId: z.string().uuid(), deploymentId: z.string().uuid() })
+        .parse(request.params);
+
+      const agent = await prisma.agent.findFirst({
+        where: { id: agentId, orgId },
+      });
+
+      if (!agent) {
+        return reply.notFound("Agent not found");
+      }
+
+      const deployment = await prisma.agentDeployment.findFirst({
+        where: { id: deploymentId, agentId },
+      });
+
+      if (!deployment) {
+        return reply.notFound("Deployment not found");
+      }
+
+      return {
+        logs: deployment.buildLogs || "No logs available",
+        error: deployment.lastError,
+      };
+    }
+  );
+};
+
+// ============================================
+// Helper Functions
+// ============================================
+
+async function submitAgentToNosana(
+  deploymentId: string,
+  agent: any,
+  config: z.infer<typeof deployAgentSchema>
+): Promise<void> {
+  try {
+    // Update status to building
+    await prisma.agentDeployment.update({
+      where: { id: deploymentId },
+      data: { status: "building" },
+    });
+
+    // Generate job definition
+    const jobDefinition = generateAgentJobDefinition({
+      agent,
+      modelDeploymentId: config.modelDeploymentId,
+      externalModelUrl: config.externalModelUrl,
+    });
+
+    // Update status to deploying
+    await prisma.agentDeployment.update({
+      where: { id: deploymentId },
+      data: { status: "deploying" },
+    });
+
+    // Submit to Nosana
+    const nosana = await getNosanaClient();
+    const nosanaDeployment = await nosana.createDeployment(
+      jobDefinition,
+      config.gpuTier,
+      config.replicas
+    );
+
+    // Update with Nosana job IDs
+    await prisma.agentDeployment.update({
+      where: { id: deploymentId },
+      data: {
+        nosanaJobIds: [nosanaDeployment.id],
+        endpoint: `https://agents.wheelsai.io/${agent.slug}`,
+      },
+    });
+
+    // Simulate deployment completion (in production, poll Nosana status)
+    setTimeout(async () => {
+      try {
+        await prisma.agentDeployment.update({
+          where: { id: deploymentId },
+          data: { status: "running" },
+        });
+        logger.info({ deploymentId }, "Agent deployment is now running");
+      } catch (err) {
+        logger.error({ err, deploymentId }, "Failed to update agent deployment status");
+      }
+    }, 8000);
+
+    logger.info({ deploymentId, nosanaId: nosanaDeployment.id }, "Agent submitted to Nosana");
+  } catch (error: any) {
+    logger.error({ error, deploymentId }, "Failed to submit agent to Nosana");
+
+    await prisma.agentDeployment.update({
+      where: { id: deploymentId },
+      data: {
+        status: "failed",
+        lastError: error.message || "Unknown error",
+      },
+    });
+
+    throw error;
+  }
+}

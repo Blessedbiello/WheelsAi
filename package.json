@@ -1,0 +1,33 @@
+{
+  "name": "wheelsai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI development platform built on Nosana GPU network",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "db:generate": "npm run generate -w @wheelsai/db",
+    "db:migrate": "npm run migrate:dev -w @wheelsai/db",
+    "db:studio": "npm run studio -w @wheelsai/db",
+    "db:seed": "npm run seed -w @wheelsai/db",
+    "clean": "turbo clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "prettier": "^3.1.0",
+    "turbo": "^2.0.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "packageManager": "npm@10.2.0"
+}

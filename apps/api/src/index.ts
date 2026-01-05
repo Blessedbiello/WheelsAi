@@ -1,0 +1,103 @@
+import "dotenv/config";
+import Fastify from "fastify";
+import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
+import sensible from "@fastify/sensible";
+
+import { env } from "./config/env.js";
+import { logger } from "./utils/logger.js";
+import { registerAuthPlugins } from "./middleware/auth.js";
+import { authRoutes } from "./routes/auth.js";
+import { deploymentRoutes } from "./routes/deployments.js";
+import { modelRoutes } from "./routes/models.js";
+import { healthRoutes } from "./routes/health.js";
+import { inferenceRoutes } from "./routes/inference.js";
+import { billingRoutes } from "./routes/billing.js";
+import { settingsRoutes } from "./routes/settings.js";
+import { agentRoutes } from "./routes/agents.js";
+import { trainingRoutes } from "./routes/training.js";
+
+async function main() {
+  const app = Fastify({
+    logger: logger,
+    trustProxy: true,
+  });
+
+  // Register plugins
+  await app.register(cors, {
+    origin: env.NODE_ENV === "production" ? env.CORS_ORIGIN : true,
+    credentials: true,
+  });
+
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+  });
+
+  await app.register(rateLimit, {
+    max: 100,
+    timeWindow: "1 minute",
+  });
+
+  await app.register(sensible);
+
+  // Register auth plugins (JWT, cookies)
+  await registerAuthPlugins(app);
+
+  // Register routes
+  await app.register(healthRoutes, { prefix: "/health" });
+  await app.register(authRoutes, { prefix: "/api/auth" });
+  await app.register(modelRoutes, { prefix: "/api/models" });
+  await app.register(deploymentRoutes, { prefix: "/api/deployments" });
+  await app.register(agentRoutes, { prefix: "/api/agents" });
+  await app.register(trainingRoutes, { prefix: "/api/training" });
+  await app.register(billingRoutes, { prefix: "/api/billing" });
+  await app.register(settingsRoutes, { prefix: "/api/settings" });
+  await app.register(inferenceRoutes); // OpenAI-compatible API at /v1/*
+
+  // Global error handler
+  app.setErrorHandler((error, request, reply) => {
+    app.log.error(error);
+
+    if (error.validation) {
+      return reply.status(400).send({
+        error: "Validation Error",
+        message: error.message,
+        details: error.validation,
+      });
+    }
+
+    const statusCode = error.statusCode ?? 500;
+    const message =
+      statusCode === 500 ? "Internal Server Error" : error.message;
+
+    return reply.status(statusCode).send({
+      error: error.name ?? "Error",
+      message,
+    });
+  });
+
+  // Start server
+  try {
+    await app.listen({
+      port: env.API_PORT,
+      host: env.API_HOST,
+    });
+    app.log.info(`Server running at http://${env.API_HOST}:${env.API_PORT}`);
+  } catch (err) {
+    app.log.error(err);
+    process.exit(1);
+  }
+
+  // Graceful shutdown
+  const signals = ["SIGINT", "SIGTERM"];
+  for (const signal of signals) {
+    process.on(signal, async () => {
+      app.log.info(`Received ${signal}, shutting down gracefully`);
+      await app.close();
+      process.exit(0);
+    });
+  }
+}
+
+main();
