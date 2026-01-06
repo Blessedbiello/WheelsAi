@@ -106,6 +106,7 @@ export const authApi = {
 export interface Model {
   id: string;
   hfId: string;
+  ollamaModelId?: string | null;
   displayName: string;
   description: string;
   provider: string;

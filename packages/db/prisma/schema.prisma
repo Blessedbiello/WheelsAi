@@ -92,6 +92,7 @@ model ApiKey {
 model Model {
   id               String   @id // e.g., "llama-3.1-8b"
   hfId             String   @map("hf_id") // HuggingFace model ID
+  ollamaModelId    String?  @map("ollama_model_id") // Ollama model name (e.g., "llama3.1:8b")
   displayName      String   @map("display_name")
   description      String?
   parameters       BigInt? // 8B, 70B, etc.

@@ -489,12 +489,76 @@ export function generateOllamaJobDefinition(
         id: "ollama-inference",
         args: {
           image: "ollama/ollama:latest",
-          cmd: ["serve"],
+          // Start Ollama, pull model, then keep serving
+          cmd: [
+            "/bin/sh",
+            "-c",
+            `ollama serve & sleep 5 && ollama pull ${ollamaModel} && wait`,
+          ],
           gpu: true,
           expose: [11434],
           env: {
-            OLLAMA_MODEL: ollamaModel,
+            OLLAMA_HOST: "0.0.0.0:11434",
             OLLAMA_NUM_CTX: config.maxTokens.toString(),
+            OLLAMA_NUM_GPU: "999", // Use all available GPU layers
+            OLLAMA_KEEP_ALIVE: "24h", // Keep model loaded
+          },
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Generate Ollama job with OpenAI-compatible proxy
+ * This uses a sidecar container to provide /v1/chat/completions endpoint
+ */
+export function generateOllamaWithProxyJobDefinition(
+  config: ModelDeploymentConfig
+): NosanaJobDefinition {
+  const ollamaModel = mapToOllamaModel(config.hfModelId);
+
+  return {
+    version: "0.1",
+    type: "container",
+    meta: {
+      trigger: "wheelsai",
+    },
+    ops: [
+      {
+        type: "container/run",
+        id: "ollama-server",
+        args: {
+          image: "ollama/ollama:latest",
+          cmd: [
+            "/bin/sh",
+            "-c",
+            `ollama serve & sleep 5 && ollama pull ${ollamaModel} && wait`,
+          ],
+          gpu: true,
+          expose: [11434],
+          env: {
+            OLLAMA_HOST: "0.0.0.0:11434",
+            OLLAMA_NUM_CTX: config.maxTokens.toString(),
+            OLLAMA_NUM_GPU: "999",
+            OLLAMA_KEEP_ALIVE: "24h",
+          },
+        },
+      },
+      {
+        type: "container/run",
+        id: "openai-proxy",
+        args: {
+          image: "ghcr.io/wheelsai/ollama-openai-proxy:latest",
+          cmd: [
+            "--ollama-host", "http://localhost:11434",
+            "--model", ollamaModel,
+            "--port", "8000",
+          ],
+          expose: [8000],
+          env: {
+            OLLAMA_BASE_URL: "http://localhost:11434",
+            DEFAULT_MODEL: ollamaModel,
           },
         },
       },
@@ -505,14 +569,78 @@ export function generateOllamaJobDefinition(
 function mapToOllamaModel(hfModelId: string): string {
   // Map common HuggingFace model IDs to Ollama equivalents
   const mapping: Record<string, string> = {
+    // Llama 3.1 family
     "meta-llama/Meta-Llama-3.1-8B-Instruct": "llama3.1:8b",
     "meta-llama/Meta-Llama-3.1-70B-Instruct": "llama3.1:70b",
+    "meta-llama/Meta-Llama-3.1-405B-Instruct": "llama3.1:405b",
+    // Llama 3.2 family
+    "meta-llama/Llama-3.2-1B-Instruct": "llama3.2:1b",
+    "meta-llama/Llama-3.2-3B-Instruct": "llama3.2:3b",
+    // Mistral family
     "mistralai/Mistral-7B-Instruct-v0.2": "mistral:7b",
+    "mistralai/Mistral-7B-Instruct-v0.3": "mistral:7b",
+    "mistralai/Mixtral-8x7B-Instruct-v0.1": "mixtral:8x7b",
+    "mistralai/Mixtral-8x22B-Instruct-v0.1": "mixtral:8x22b",
+    // Qwen family
     "Qwen/Qwen2-7B-Instruct": "qwen2:7b",
+    "Qwen/Qwen2-72B-Instruct": "qwen2:72b",
+    "Qwen/Qwen2.5-7B-Instruct": "qwen2.5:7b",
+    "Qwen/Qwen2.5-14B-Instruct": "qwen2.5:14b",
+    "Qwen/Qwen2.5-32B-Instruct": "qwen2.5:32b",
+    "Qwen/Qwen2.5-72B-Instruct": "qwen2.5:72b",
+    // Phi family
     "microsoft/Phi-3-mini-4k-instruct": "phi3:mini",
+    "microsoft/Phi-3-medium-4k-instruct": "phi3:medium",
+    "microsoft/Phi-3.5-mini-instruct": "phi3.5:mini",
+    // Gemma family
+    "google/gemma-2-2b-it": "gemma2:2b",
+    "google/gemma-2-9b-it": "gemma2:9b",
+    "google/gemma-2-27b-it": "gemma2:27b",
+    // Code models
+    "Qwen/Qwen2.5-Coder-7B-Instruct": "qwen2.5-coder:7b",
+    "deepseek-ai/deepseek-coder-6.7b-instruct": "deepseek-coder:6.7b",
+    "codellama/CodeLlama-7b-Instruct-hf": "codellama:7b",
+    "codellama/CodeLlama-34b-Instruct-hf": "codellama:34b",
   };
 
   return mapping[hfModelId] ?? hfModelId.split("/").pop() ?? hfModelId;
+}
+
+/**
+ * Check if a model is available in Ollama
+ */
+export function isOllamaSupported(hfModelId: string): boolean {
+  const ollamaModels = [
+    // Llama family
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    "meta-llama/Llama-3.2-1B-Instruct",
+    "meta-llama/Llama-3.2-3B-Instruct",
+    // Mistral family
+    "mistralai/Mistral-7B-Instruct-v0.2",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "mistralai/Mixtral-8x7B-Instruct-v0.1",
+    // Qwen family
+    "Qwen/Qwen2-7B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct",
+    "Qwen/Qwen2.5-14B-Instruct",
+    "Qwen/Qwen2.5-32B-Instruct",
+    "Qwen/Qwen2.5-72B-Instruct",
+    // Phi family
+    "microsoft/Phi-3-mini-4k-instruct",
+    "microsoft/Phi-3-medium-4k-instruct",
+    "microsoft/Phi-3.5-mini-instruct",
+    // Gemma family
+    "google/gemma-2-2b-it",
+    "google/gemma-2-9b-it",
+    "google/gemma-2-27b-it",
+    // Code models
+    "Qwen/Qwen2.5-Coder-7B-Instruct",
+    "deepseek-ai/deepseek-coder-6.7b-instruct",
+    "codellama/CodeLlama-7b-Instruct-hf",
+  ];
+
+  return ollamaModels.includes(hfModelId);
 }
 
 export function generateJobDefinition(

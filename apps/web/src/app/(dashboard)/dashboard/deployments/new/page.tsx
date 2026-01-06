@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Cpu, Check, Zap } from "lucide-react";
+import { ArrowLeft, Cpu, Check, Zap, Server, Box } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
@@ -16,6 +16,40 @@ import { modelsApi, deploymentsApi, type Model, type GpuTier } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Step = "model" | "config" | "review";
+type Engine = "vllm" | "ollama";
+
+interface EngineOption {
+  id: Engine;
+  name: string;
+  description: string;
+  icon: typeof Server;
+  features: string[];
+}
+
+const ENGINE_OPTIONS: EngineOption[] = [
+  {
+    id: "vllm",
+    name: "vLLM",
+    description: "High-throughput serving with PagedAttention",
+    icon: Server,
+    features: [
+      "Maximum throughput",
+      "Continuous batching",
+      "Best for production",
+    ],
+  },
+  {
+    id: "ollama",
+    name: "Ollama",
+    description: "Simple deployment with OpenAI-compatible API",
+    icon: Box,
+    features: [
+      "Easy setup",
+      "Lower resource usage",
+      "Great for development",
+    ],
+  },
+];
 
 export default function NewDeploymentPage() {
   const router = useRouter();
@@ -28,6 +62,7 @@ export default function NewDeploymentPage() {
   // Form state
   const [selectedModel, setSelectedModel] = useState<Model | null>(null);
   const [selectedGpu, setSelectedGpu] = useState<GpuTier | null>(null);
+  const [selectedEngine, setSelectedEngine] = useState<Engine>("vllm");
   const [name, setName] = useState("");
   const [replicas, setReplicas] = useState(1);
   const [maxTokens, setMaxTokens] = useState(4096);
@@ -51,6 +86,9 @@ export default function NewDeploymentPage() {
     setSelectedModel(model);
     setName(model.displayName.toLowerCase().replace(/\s+/g, "-"));
 
+    // Set default engine from model
+    setSelectedEngine(model.defaultEngine as Engine);
+
     // Auto-select compatible GPU
     const compatible = gpuTiers.find((g) => g.id === model.minGpuTier);
     if (compatible) {
@@ -66,6 +104,10 @@ export default function NewDeploymentPage() {
     return gpuTiers.filter((g) => tierOrder.indexOf(g.id) >= minIndex);
   }
 
+  function getAvailableEngines(model: Model): EngineOption[] {
+    return ENGINE_OPTIONS.filter((e) => model.supportedEngines.includes(e.id));
+  }
+
   async function handleDeploy() {
     if (!selectedModel || !selectedGpu) return;
 
@@ -75,7 +117,7 @@ export default function NewDeploymentPage() {
         name,
         modelId: selectedModel.id,
         gpuTier: selectedGpu.id,
-        engine: selectedModel.defaultEngine as "vllm" | "ollama",
+        engine: selectedEngine,
         replicas,
         config: { maxTokens },
       });
@@ -99,7 +141,11 @@ export default function NewDeploymentPage() {
     return params.toString();
   }
 
-  const estimatedCost = selectedGpu ? selectedGpu.pricePerHour * replicas * 24 * 30 : 0;
+  // Ollama has slightly lower overhead
+  const engineMultiplier = selectedEngine === "ollama" ? 0.95 : 1.0;
+  const estimatedCost = selectedGpu
+    ? selectedGpu.pricePerHour * replicas * 24 * 30 * engineMultiplier
+    : 0;
 
   return (
     <div className="flex flex-col">
@@ -185,7 +231,14 @@ export default function NewDeploymentPage() {
                       </div>
                       <div className="mt-3 flex items-center justify-between text-sm text-gray-500">
                         <span>Min: {model.minGpuTier}</span>
-                        <span>{model.contextLength.toLocaleString()} ctx</span>
+                        <div className="flex items-center gap-2">
+                          {model.supportedEngines.includes("ollama") && (
+                            <Badge variant="secondary" className="text-xs">
+                              Ollama
+                            </Badge>
+                          )}
+                          <span>{model.contextLength.toLocaleString()} ctx</span>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -224,6 +277,66 @@ export default function NewDeploymentPage() {
                   <p className="mt-1 text-sm text-gray-500">
                     This will be used in your endpoint URL
                   </p>
+                </div>
+
+                {/* Engine Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Inference Engine
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {getAvailableEngines(selectedModel).map((engine) => {
+                      const Icon = engine.icon;
+                      const isDefault = selectedModel.defaultEngine === engine.id;
+                      return (
+                        <div
+                          key={engine.id}
+                          className={cn(
+                            "cursor-pointer rounded-lg border-2 p-4 transition-all",
+                            selectedEngine === engine.id
+                              ? "border-primary-500 bg-primary-50"
+                              : "border-gray-200 hover:border-gray-300"
+                          )}
+                          onClick={() => setSelectedEngine(engine.id)}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "flex h-10 w-10 items-center justify-center rounded-lg",
+                              selectedEngine === engine.id
+                                ? "bg-primary-100 text-primary-600"
+                                : "bg-gray-100 text-gray-600"
+                            )}>
+                              <Icon className="h-5 w-5" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{engine.name}</span>
+                                {isDefault && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Recommended
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-500">{engine.description}</p>
+                            </div>
+                          </div>
+                          <ul className="mt-3 space-y-1">
+                            {engine.features.map((feature) => (
+                              <li key={feature} className="flex items-center gap-2 text-sm text-gray-600">
+                                <Check className="h-3 w-3 text-green-500" />
+                                {feature}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {getAvailableEngines(selectedModel).length === 1 && (
+                    <p className="mt-2 text-sm text-gray-500">
+                      This model only supports {selectedModel.defaultEngine} engine.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -302,7 +415,8 @@ export default function NewDeploymentPage() {
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
-                    Based on 24/7 usage. Actual cost depends on uptime.
+                    Based on 24/7 usage.
+                    {selectedEngine === "ollama" && " Ollama offers ~5% lower overhead."}
                   </p>
                 </div>
 
@@ -345,6 +459,17 @@ export default function NewDeploymentPage() {
                     <span className="font-medium">{name}</span>
                   </div>
                   <div className="flex items-center justify-between p-4">
+                    <span className="text-gray-600">Inference Engine</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">
+                        {selectedEngine === "vllm" ? "vLLM" : "Ollama"}
+                      </span>
+                      {selectedEngine === selectedModel.defaultEngine && (
+                        <Badge variant="secondary" className="text-xs">Default</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between p-4">
                     <span className="text-gray-600">GPU</span>
                     <span className="font-medium">{selectedGpu.name}</span>
                   </div>
@@ -357,8 +482,8 @@ export default function NewDeploymentPage() {
                     <span className="font-medium">{maxTokens.toLocaleString()}</span>
                   </div>
                   <div className="flex items-center justify-between p-4">
-                    <span className="text-gray-600">Engine</span>
-                    <span className="font-medium">{selectedModel.defaultEngine}</span>
+                    <span className="text-gray-600">Estimated Cost</span>
+                    <span className="font-medium">${estimatedCost.toFixed(2)}/mo</span>
                   </div>
                 </div>
 
@@ -373,6 +498,11 @@ export default function NewDeploymentPage() {
                           https://api.wheelsai.io/v1/{name}
                         </code>
                       </p>
+                      {selectedEngine === "ollama" && (
+                        <p className="mt-2 text-sm text-primary-700">
+                          Using Ollama engine with OpenAI-compatible API at port 11434.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -383,7 +513,7 @@ export default function NewDeploymentPage() {
                   </Button>
                   <Button onClick={handleDeploy} isLoading={isDeploying}>
                     <Cpu className="mr-2 h-4 w-4" />
-                    Deploy Model
+                    Deploy with {selectedEngine === "vllm" ? "vLLM" : "Ollama"}
                   </Button>
                 </div>
               </CardContent>
