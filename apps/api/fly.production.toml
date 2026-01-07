@@ -1,0 +1,43 @@
+# Fly.io configuration for WheelsAI API (Production)
+# Deploy with: fly deploy --config fly.production.toml
+
+app = "wheelsai-api"
+primary_region = "lax"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  API_PORT = "4000"
+  API_HOST = "0.0.0.0"
+  LOG_LEVEL = "info"
+  SOLANA_NETWORK = "mainnet-beta"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 2
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 500
+    soft_limit = 400
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  timeout = "5s"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 2
+
+[metrics]
+  port = 4000
+  path = "/metrics"

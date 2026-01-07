@@ -1,0 +1,51 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build outputs
+.next
+**/dist
+**/.turbo
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
+coverage
+.nyc_output
+
+# Documentation
+*.md
+!README.md
+
+# Claude
+.claude
+claude.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Fly.io
+fly.*.toml

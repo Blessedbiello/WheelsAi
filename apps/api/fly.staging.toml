@@ -1,0 +1,43 @@
+# Fly.io configuration for WheelsAI API (Staging)
+# Deploy with: fly deploy --config fly.staging.toml
+
+app = "wheelsai-api-staging"
+primary_region = "lax"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "staging"
+  API_PORT = "4000"
+  API_HOST = "0.0.0.0"
+  LOG_LEVEL = "debug"
+  SOLANA_NETWORK = "devnet"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  timeout = "5s"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[metrics]
+  port = 4000
+  path = "/metrics"

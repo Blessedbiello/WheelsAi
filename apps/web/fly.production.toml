@@ -1,0 +1,39 @@
+# Fly.io configuration for WheelsAI Web (Production)
+# Deploy with: fly deploy --config fly.production.toml
+
+app = "wheelsai-web"
+primary_region = "lax"
+
+[build]
+  dockerfile = "Dockerfile"
+  [build.args]
+    NEXT_PUBLIC_APP_URL = "https://wheelsai.io"
+    NEXT_PUBLIC_API_URL = "https://api.wheelsai.io"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 2
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 500
+    soft_limit = 400
+
+[[http_service.checks]]
+  grace_period = "15s"
+  interval = "30s"
+  method = "GET"
+  path = "/api/health"
+  timeout = "5s"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 2
