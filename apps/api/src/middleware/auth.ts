@@ -14,6 +14,7 @@ declare module "fastify" {
     auth: {
       userId: string;
       orgId: string;
+      orgName?: string;
       email?: string;
       walletAddress?: string;
       type: "jwt" | "api_key";

@@ -50,6 +50,14 @@ model Organization {
   agentWallets  AgentWallet[]
   x402Payments  X402Payment[]
 
+  // Marketplace relations
+  publisherProfile   PublisherProfile?
+  publishedListings  AgentListing[]     @relation("PublishedAgents")
+  agentReviews       AgentReview[]      @relation("AgentReviews")
+  agentInstalls      AgentInstall[]     @relation("AgentInstalls")
+  agentSubscriptions AgentSubscription[] @relation("AgentSubscriptions")
+  creatorPayouts     CreatorPayout[]    @relation("CreatorPayouts")
+
   @@map("organizations")
 }
 
@@ -291,6 +299,7 @@ model Agent {
 
   org           Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   deployments   AgentDeployment[]
+  listing       AgentListing?
 
   @@unique([orgId, slug])
   @@index([orgId])
@@ -475,4 +484,197 @@ model X402Payment {
   @@index([txSignature])
   @@index([status])
   @@map("x402_payments")
+}
+
+// ============================================
+// Agent Marketplace (Phase 3)
+// ============================================
+
+model AgentListing {
+  id                String    @id @default(uuid()) @db.Uuid
+  agentId           String    @unique @map("agent_id") @db.Uuid
+  title             String
+  slug              String    @unique // URL-friendly identifier
+  shortDescription  String    @map("short_description") @db.VarChar(280)
+  longDescription   String?   @map("long_description") @db.Text
+  category          String    // 'customer-support', 'coding', 'research', 'automation', 'creative', 'other'
+  iconUrl           String?   @map("icon_url")
+  screenshots       String[]  @default([])
+  readme            String?   @db.Text
+
+  // Pricing
+  pricingModel      String    @map("pricing_model") // 'free', 'per_request', 'monthly'
+  pricePerRequestCents BigInt? @map("price_per_request_cents")
+  monthlyPriceCents BigInt?   @map("monthly_price_cents")
+
+  // Publisher
+  publisherId       String    @map("publisher_id") @db.Uuid
+  publisherName     String    @map("publisher_name")
+
+  // Status & Stats
+  status            String    @default("draft") // 'draft', 'pending_review', 'published', 'archived'
+  isFeatured        Boolean   @default(false) @map("is_featured")
+  totalInstalls     Int       @default(0) @map("total_installs")
+  activeInstalls    Int       @default(0) @map("active_installs")
+  avgRating         Float     @default(0) @map("avg_rating")
+  reviewCount       Int       @default(0) @map("review_count")
+  totalRequests     BigInt    @default(0) @map("total_requests")
+
+  publishedAt       DateTime? @map("published_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  agent             Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  publisher         Organization @relation("PublishedAgents", fields: [publisherId], references: [id])
+  reviews           AgentReview[]
+  installs          AgentInstall[]
+  subscriptions     AgentSubscription[]
+
+  @@index([publisherId])
+  @@index([status, category])
+  @@index([avgRating])
+  @@index([isFeatured, status])
+  @@map("agent_listings")
+}
+
+model AgentReview {
+  id            String   @id @default(uuid()) @db.Uuid
+  listingId     String   @map("listing_id") @db.Uuid
+  reviewerId    String   @map("reviewer_id") @db.Uuid
+  rating        Int      // 1-5
+  title         String?  @db.VarChar(200)
+  content       String?  @db.Text
+  isVerified    Boolean  @default(false) @map("is_verified") // Verified if reviewer has installed agent
+  helpfulCount  Int      @default(0) @map("helpful_count")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  listing       AgentListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  reviewer      Organization @relation("AgentReviews", fields: [reviewerId], references: [id])
+
+  @@unique([listingId, reviewerId])
+  @@index([listingId, createdAt])
+  @@map("agent_reviews")
+}
+
+model AgentInstall {
+  id              String    @id @default(uuid()) @db.Uuid
+  listingId       String    @map("listing_id") @db.Uuid
+  buyerId         String    @map("buyer_id") @db.Uuid
+  clonedAgentId   String?   @map("cloned_agent_id") @db.Uuid // The cloned agent in buyer's account
+  status          String    @default("active") // 'active', 'stopped', 'uninstalled'
+  totalRequests   BigInt    @default(0) @map("total_requests")
+  totalSpentCents BigInt    @default(0) @map("total_spent_cents")
+  installedAt     DateTime  @default(now()) @map("installed_at")
+  uninstalledAt   DateTime? @map("uninstalled_at")
+
+  listing         AgentListing @relation(fields: [listingId], references: [id])
+  buyer           Organization @relation("AgentInstalls", fields: [buyerId], references: [id])
+
+  @@unique([listingId, buyerId])
+  @@index([buyerId])
+  @@map("agent_installs")
+}
+
+model AgentSubscription {
+  id                  String    @id @default(uuid()) @db.Uuid
+  listingId           String    @map("listing_id") @db.Uuid
+  subscriberId        String    @map("subscriber_id") @db.Uuid
+  status              String    @default("active") // 'active', 'cancelled', 'expired', 'past_due'
+  currentPeriodStart  DateTime  @map("current_period_start")
+  currentPeriodEnd    DateTime  @map("current_period_end")
+  cancelAtPeriodEnd   Boolean   @default(false) @map("cancel_at_period_end")
+  cancelledAt         DateTime? @map("cancelled_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  listing             AgentListing @relation(fields: [listingId], references: [id])
+  subscriber          Organization @relation("AgentSubscriptions", fields: [subscriberId], references: [id])
+
+  @@unique([listingId, subscriberId])
+  @@index([subscriberId])
+  @@index([currentPeriodEnd, status])
+  @@map("agent_subscriptions")
+}
+
+model PublisherProfile {
+  orgId              String   @id @map("org_id") @db.Uuid
+  displayName        String   @map("display_name")
+  slug               String   @unique // URL-friendly identifier
+  bio                String?  @db.Text
+  avatarUrl          String?  @map("avatar_url")
+  website            String?
+  twitter            String?
+  github             String?
+  isVerified         Boolean  @default(false) @map("is_verified")
+  totalRevenueCents  BigInt   @default(0) @map("total_revenue_cents")
+  pendingPayoutCents BigInt   @default(0) @map("pending_payout_cents")
+  totalListings      Int      @default(0) @map("total_listings")
+  totalInstalls      Int      @default(0) @map("total_installs")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  org                Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("publisher_profiles")
+}
+
+model CreatorPayout {
+  id                String    @id @default(uuid()) @db.Uuid
+  publisherId       String    @map("publisher_id") @db.Uuid
+  amountCents       BigInt    @map("amount_cents")
+  payoutMethod      String    @map("payout_method") // 'credits', 'crypto_usdc', 'crypto_sol'
+  payoutAddress     String?   @map("payout_address") // Wallet address for crypto payouts
+  status            String    @default("pending") // 'pending', 'processing', 'completed', 'failed'
+  txSignature       String?   @unique @map("tx_signature")
+
+  // Revenue breakdown
+  grossRevenueCents BigInt    @map("gross_revenue_cents")
+  platformFeeCents  BigInt    @map("platform_fee_cents") // 10% platform fee
+
+  // Period covered
+  periodStart       DateTime  @map("period_start")
+  periodEnd         DateTime  @map("period_end")
+
+  requestedAt       DateTime  @default(now()) @map("requested_at")
+  processedAt       DateTime? @map("processed_at")
+  failureReason     String?   @map("failure_reason")
+
+  publisher         Organization @relation("CreatorPayouts", fields: [publisherId], references: [id])
+
+  @@index([publisherId, status])
+  @@map("creator_payouts")
+}
+
+// Revenue tracking for marketplace transactions
+model MarketplaceRevenue {
+  id              String   @id @default(uuid()) @db.Uuid
+  listingId       String   @map("listing_id") @db.Uuid
+  installId       String?  @map("install_id") @db.Uuid
+  subscriptionId  String?  @map("subscription_id") @db.Uuid
+  buyerId         String   @map("buyer_id") @db.Uuid
+  publisherId     String   @map("publisher_id") @db.Uuid
+
+  // Transaction type
+  type            String   // 'per_request', 'subscription', 'subscription_renewal'
+
+  // Amounts
+  grossAmountCents BigInt  @map("gross_amount_cents")
+  platformFeeCents BigInt  @map("platform_fee_cents") // 10%
+  creatorAmountCents BigInt @map("creator_amount_cents") // 90%
+
+  // Request count (for per_request billing)
+  requestCount    Int      @default(1) @map("request_count")
+
+  // Status
+  status          String   @default("pending") // 'pending', 'settled', 'refunded'
+  settledAt       DateTime? @map("settled_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([listingId, createdAt])
+  @@index([publisherId, createdAt])
+  @@index([buyerId, createdAt])
+  @@index([status])
+  @@map("marketplace_revenue")
 }

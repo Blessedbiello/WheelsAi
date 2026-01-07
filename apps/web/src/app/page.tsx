@@ -15,6 +15,12 @@ export default function HomePage() {
           </div>
           <nav className="hidden items-center gap-6 md:flex">
             <Link
+              href="/marketplace"
+              className="text-sm font-medium text-gray-600 hover:text-gray-900"
+            >
+              Marketplace
+            </Link>
+            <Link
               href="/models"
               className="text-sm font-medium text-gray-600 hover:text-gray-900"
             >

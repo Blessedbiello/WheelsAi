@@ -750,4 +750,283 @@ export const trainingApi = {
     api<{ models: TrainableModel[] }>("/api/training/models"),
 };
 
+// ============================================
+// Marketplace API
+// ============================================
+
+export interface MarketplaceListing {
+  id: string;
+  agentId: string;
+  title: string;
+  slug: string;
+  shortDescription: string;
+  longDescription: string | null;
+  category: string;
+  iconUrl: string | null;
+  screenshots: string[];
+  readme: string | null;
+  pricingModel: "free" | "per_request" | "monthly";
+  pricePerRequestCents: number | null;
+  monthlyPriceCents: number | null;
+  publisherId: string;
+  publisherName: string;
+  status: "draft" | "pending_review" | "published" | "archived";
+  isFeatured: boolean;
+  totalInstalls: number;
+  activeInstalls: number;
+  avgRating: number;
+  reviewCount: number;
+  totalRequests: number;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  agent?: {
+    id: string;
+    framework: string;
+    tags: string[];
+  };
+}
+
+export interface MarketplaceCategory {
+  id: string;
+  label: string;
+  icon: string;
+  count: number;
+}
+
+export interface MarketplaceReview {
+  id: string;
+  rating: number;
+  title: string | null;
+  content: string | null;
+  isVerified: boolean;
+  helpfulCount: number;
+  reviewerName: string;
+  createdAt: string;
+}
+
+export interface PublisherProfile {
+  displayName: string;
+  slug: string;
+  bio: string | null;
+  avatarUrl: string | null;
+  website: string | null;
+  twitter: string | null;
+  github: string | null;
+  isVerified: boolean;
+  totalListings: number;
+  totalInstalls: number;
+  createdAt: string;
+  listings: MarketplaceListing[];
+}
+
+export interface PaginatedResponse<T> {
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface CreateListingInput {
+  agentId: string;
+  title: string;
+  shortDescription: string;
+  longDescription?: string;
+  category: "customer-support" | "coding" | "research" | "automation" | "creative" | "other";
+  iconUrl?: string;
+  screenshots?: string[];
+  readme?: string;
+  pricingModel: "free" | "per_request" | "monthly";
+  pricePerRequestCents?: number;
+  monthlyPriceCents?: number;
+}
+
+export interface SearchListingsParams {
+  query?: string;
+  category?: string;
+  pricingModel?: string;
+  minRating?: number;
+  sortBy?: "popular" | "rating" | "newest" | "price_low" | "price_high";
+  page?: number;
+  limit?: number;
+}
+
+export const marketplaceApi = {
+  // Public Routes
+  searchListings: (params: SearchListingsParams = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.query) searchParams.set("query", params.query);
+    if (params.category) searchParams.set("category", params.category);
+    if (params.pricingModel) searchParams.set("pricingModel", params.pricingModel);
+    if (params.minRating) searchParams.set("minRating", params.minRating.toString());
+    if (params.sortBy) searchParams.set("sortBy", params.sortBy);
+    if (params.page) searchParams.set("page", params.page.toString());
+    if (params.limit) searchParams.set("limit", params.limit.toString());
+
+    const queryString = searchParams.toString();
+    return api<{ listings: MarketplaceListing[] } & PaginatedResponse<MarketplaceListing>>(
+      `/api/marketplace/listings${queryString ? `?${queryString}` : ""}`
+    );
+  },
+
+  getListing: (slugOrId: string) =>
+    api<{ listing: MarketplaceListing }>(`/api/marketplace/listings/${slugOrId}`),
+
+  getListingReviews: (id: string, page = 1, limit = 10) =>
+    api<{ reviews: MarketplaceReview[] } & PaginatedResponse<MarketplaceReview>>(
+      `/api/marketplace/listings/${id}/reviews?page=${page}&limit=${limit}`
+    ),
+
+  getCategories: () =>
+    api<{ categories: MarketplaceCategory[] }>("/api/marketplace/categories"),
+
+  getFeatured: (limit = 6) =>
+    api<{ listings: MarketplaceListing[] }>(`/api/marketplace/featured?limit=${limit}`),
+
+  getPublisher: (slug: string) =>
+    api<{ publisher: PublisherProfile }>(`/api/marketplace/publishers/${slug}`),
+
+  getPricingModels: () =>
+    api<{ pricingModels: Array<{ id: string; label: string }> }>("/api/marketplace/pricing-models"),
+
+  // Protected Routes
+  createListing: (input: CreateListingInput) =>
+    api<{ listing: MarketplaceListing }>("/api/marketplace/listings", {
+      method: "POST",
+      body: input,
+    }),
+
+  updateListing: (id: string, updates: Partial<Omit<CreateListingInput, "agentId">>) =>
+    api<{ listing: MarketplaceListing }>(`/api/marketplace/listings/${id}`, {
+      method: "PATCH",
+      body: updates,
+    }),
+
+  publishListing: (id: string) =>
+    api<{ listing: MarketplaceListing; message: string }>(`/api/marketplace/listings/${id}/publish`, {
+      method: "POST",
+    }),
+
+  archiveListing: (id: string) =>
+    api<{ listing: MarketplaceListing; message: string }>(`/api/marketplace/listings/${id}/archive`, {
+      method: "POST",
+    }),
+
+  getMyListings: () =>
+    api<{ listings: MarketplaceListing[] }>("/api/marketplace/my-listings"),
+
+  createReview: (listingId: string, data: { rating: number; title?: string; content?: string }) =>
+    api<{ review: MarketplaceReview }>(`/api/marketplace/listings/${listingId}/reviews`, {
+      method: "POST",
+      body: data,
+    }),
+
+  // Install Routes
+  installAgent: (listingId: string) =>
+    api<{
+      message: string;
+      install: { id: string; status: string };
+      clonedAgent: { id: string; name: string; slug: string };
+    }>(`/api/marketplace/listings/${listingId}/install`, {
+      method: "POST",
+    }),
+
+  uninstallAgent: (listingId: string) =>
+    api<{ message: string }>(`/api/marketplace/listings/${listingId}/uninstall`, {
+      method: "POST",
+    }),
+
+  checkInstallStatus: (listingId: string) =>
+    api<{
+      isInstalled: boolean;
+      install: {
+        id: string;
+        status: string;
+        clonedAgentId: string;
+        installedAt: string;
+      } | null;
+    }>(`/api/marketplace/listings/${listingId}/install-status`),
+
+  getMyInstalls: () =>
+    api<{
+      installs: Array<{
+        id: string;
+        listingId: string;
+        clonedAgentId: string;
+        status: string;
+        totalRequests: number;
+        totalSpentCents: number;
+        installedAt: string;
+        listing: MarketplaceListing;
+      }>;
+    }>("/api/marketplace/my-installs"),
+
+  // Revenue Routes
+  getRevenue: () =>
+    api<{
+      totalRevenueCents: number;
+      pendingPayoutCents: number;
+      totalListings: number;
+      totalInstalls: number;
+      revenueByListing: Array<{
+        listingId: string;
+        listing: { id: string; title: string; slug: string } | undefined;
+        totalRevenueCents: number;
+        totalRequests: number;
+      }>;
+      recentTransactions: Array<{
+        id: string;
+        type: string;
+        grossAmountCents: number;
+        platformFeeCents: number;
+        creatorAmountCents: number;
+        requestCount: number;
+        status: string;
+        createdAt: string;
+      }>;
+      pendingPayouts: Array<{
+        id: string;
+        amountCents: number;
+        payoutMethod: string;
+        status: string;
+        requestedAt: string;
+      }>;
+    }>("/api/marketplace/revenue"),
+
+  requestPayout: (payoutMethod: "credits" | "crypto_usdc" | "crypto_sol", payoutAddress?: string) =>
+    api<{
+      payout: {
+        id: string;
+        amountCents: number;
+        payoutMethod: string;
+        status: string;
+        requestedAt: string;
+      };
+    }>("/api/marketplace/payouts", {
+      method: "POST",
+      body: { payoutMethod, payoutAddress },
+    }),
+
+  getPayoutHistory: () =>
+    api<{
+      payouts: Array<{
+        id: string;
+        amountCents: number;
+        payoutMethod: string;
+        payoutAddress: string | null;
+        status: string;
+        txSignature: string | null;
+        grossRevenueCents: number;
+        platformFeeCents: number;
+        periodStart: string;
+        periodEnd: string;
+        requestedAt: string;
+        processedAt: string | null;
+        failureReason: string | null;
+      }>;
+    }>("/api/marketplace/payouts"),
+};
+
 export { ApiError };
