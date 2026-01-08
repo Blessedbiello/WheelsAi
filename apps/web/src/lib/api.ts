@@ -1029,4 +1029,122 @@ export const marketplaceApi = {
     }>("/api/marketplace/payouts"),
 };
 
+// ============================================
+// Reputation API
+// ============================================
+
+export interface ReputationBreakdown {
+  score: number;
+  tier: string;
+  breakdown: {
+    avgRating: { value: number; score: number; weight: number };
+    installCount: { value: number; score: number; weight: number };
+    responseTime: { value: number | null; score: number; weight: number };
+    accountAge: { value: number; score: number; weight: number };
+    verificationStatus: { value: boolean; score: number; weight: number };
+    disputeRatio: { value: number; score: number; weight: number };
+    payoutSuccess: { value: number; score: number; weight: number };
+  };
+  badges: string[];
+}
+
+export interface PublisherReputation {
+  orgId: string;
+  displayName: string;
+  slug: string;
+  avatarUrl: string | null;
+  bio: string | null;
+  website: string | null;
+  twitter: string | null;
+  github: string | null;
+  isVerified: boolean;
+  reputationScore: number;
+  reputationTier: string;
+  badges: string[];
+  totalListings: number;
+  totalInstalls: number;
+  avgResponseTimeMs: number | null;
+  joinedDaysAgo: number;
+  createdAt: string;
+}
+
+export interface LeaderboardEntry {
+  orgId: string;
+  displayName: string;
+  slug: string;
+  avatarUrl: string | null;
+  isVerified: boolean;
+  reputationScore: number;
+  reputationTier: string;
+  badges: string[];
+  totalListings: number;
+  totalInstalls: number;
+}
+
+export interface BadgeInfo {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+}
+
+export interface ReputationStats {
+  totalPublishers: number;
+  averageScore: number;
+  tierDistribution: Record<string, number>;
+}
+
+export const reputationApi = {
+  // Public Routes
+  getLeaderboard: (limit = 10) =>
+    api<{ success: boolean; data: LeaderboardEntry[] }>(
+      `/api/reputation/leaderboard?limit=${limit}`
+    ),
+
+  getPublishersByTier: (tier: string, limit = 20) =>
+    api<{ success: boolean; data: LeaderboardEntry[] }>(
+      `/api/reputation/tier/${tier}?limit=${limit}`
+    ),
+
+  getAllBadges: () =>
+    api<{ success: boolean; data: BadgeInfo[] }>("/api/reputation/badges"),
+
+  getBadge: (badge: string) =>
+    api<{ success: boolean; data: BadgeInfo }>(`/api/reputation/badges/${badge}`),
+
+  getPublisherReputation: (slug: string) =>
+    api<{ success: boolean; data: PublisherReputation }>(
+      `/api/reputation/publisher/${slug}`
+    ),
+
+  getPublisherBreakdown: (slug: string) =>
+    api<{ success: boolean; data: ReputationBreakdown }>(
+      `/api/reputation/publisher/${slug}/breakdown`
+    ),
+
+  getStats: () =>
+    api<{ success: boolean; data: ReputationStats }>("/api/reputation/stats"),
+
+  // Protected Routes
+  getMyReputation: () =>
+    api<{
+      success: boolean;
+      data: {
+        profile: {
+          displayName: string;
+          slug: string;
+          avatarUrl: string | null;
+          isVerified: boolean;
+        };
+        reputation: ReputationBreakdown;
+      };
+    }>("/api/reputation/my-reputation"),
+
+  recalculateReputation: () =>
+    api<{ success: boolean; data: ReputationBreakdown; message: string }>(
+      "/api/reputation/recalculate",
+      { method: "POST" }
+    ),
+};
+
 export { ApiError };

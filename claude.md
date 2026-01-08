@@ -1069,12 +1069,11 @@ Monitoring:
 - [ ] Production deployment
 
 **Out of scope:**
-- Agent Studio / visual builder
-- Training Studio
-- X-402 payments
-- Agent wallets
+- Agent Studio / visual builder (moved to Phase 2)
+- Training Studio (moved to Phase 2)
+- X-402 payments (moved to Phase 2)
+- Agent wallets (moved to Phase 2)
 - Multi-chain support
-- Ollama engine
 
 **Deliverables:**
 - User can sign up, add credits
@@ -1097,7 +1096,7 @@ Monitoring:
 - [x] Training Studio (LoRA/QLoRA)
 - [x] Dataset upload and validation
 - [x] Training job monitoring
-- [ ] Ollama engine support
+- [x] Ollama engine support (vLLM alternative with 22 models)
 - [ ] More GPU tiers
 - [ ] Staging environment
 - [ ] Production deployment
@@ -1132,6 +1131,14 @@ Monitoring:
 - Training job service with LoRA/QLoRA support
 - Cost estimation based on dataset size and GPU tier
 - Training job list, detail, and create wizard UI
+
+*Ollama Engine:*
+- Ollama job definitions in Nosana service with model pulling
+- OpenAI-compatible proxy option for Ollama deployments
+- Expanded model catalog from 8 to 22 models with Ollama mappings
+- `ollamaModelId` field in database schema
+- Engine selection UI in deployment wizard (vLLM vs Ollama)
+- Feature comparison and recommended engine badges
 
 **Out of scope:**
 - Visual agent builder

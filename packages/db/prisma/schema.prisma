@@ -300,6 +300,7 @@ model Agent {
   org           Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
   deployments   AgentDeployment[]
   listing       AgentListing?
+  graph         AgentGraph?
 
   @@unique([orgId, slug])
   @@index([orgId])
@@ -614,6 +615,18 @@ model PublisherProfile {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
+  // Reputation System fields
+  reputationScore    Float    @default(0) @map("reputation_score") // 0-100 score
+  reputationTier     String   @default("new") @map("reputation_tier") // 'new', 'bronze', 'silver', 'gold', 'platinum'
+  avgResponseTimeMs  BigInt?  @map("avg_response_time_ms") // Average response time
+  supportResponseMs  BigInt?  @map("support_response_ms") // Average support response time
+  successfulPayouts  Int      @default(0) @map("successful_payouts")
+  disputeCount       Int      @default(0) @map("dispute_count")
+  disputeResolvedCount Int    @default(0) @map("dispute_resolved_count")
+  joinedDaysAgo      Int      @default(0) @map("joined_days_ago") // Calculated on profile update
+  badges             String[] @default([]) // 'fast-responder', 'top-rated', 'verified-developer', etc.
+  lastReputationCalc DateTime? @map("last_reputation_calc")
+
   org                Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@map("publisher_profiles")
@@ -677,4 +690,144 @@ model MarketplaceRevenue {
   @@index([buyerId, createdAt])
   @@index([status])
   @@map("marketplace_revenue")
+}
+
+// ============================================
+// Enterprise Features (Phase 3)
+// ============================================
+
+model AuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  userId        String?  @map("user_id") @db.Uuid
+  action        String   // 'create', 'update', 'delete', 'login', 'logout', 'deploy', 'invite', etc.
+  resource      String   // 'deployment', 'agent', 'api_key', 'user', 'settings', etc.
+  resourceId    String?  @map("resource_id")
+  details       Json?    // Additional context
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+  status        String   @default("success") // 'success', 'failure'
+  errorMessage  String?  @map("error_message")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([orgId, createdAt])
+  @@index([orgId, action])
+  @@index([orgId, resource])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model SsoConfig {
+  orgId           String   @id @map("org_id") @db.Uuid
+  provider        String   // 'saml', 'oidc'
+  enabled         Boolean  @default(false)
+
+  // SAML settings
+  samlEntityId    String?  @map("saml_entity_id")
+  samlSsoUrl      String?  @map("saml_sso_url")
+  samlCertificate String?  @map("saml_certificate") @db.Text
+
+  // OIDC settings
+  oidcClientId    String?  @map("oidc_client_id")
+  oidcClientSecret Bytes?  @map("oidc_client_secret") // Encrypted
+  oidcIssuer      String?  @map("oidc_issuer")
+  oidcScopes      String[] @default(["openid", "profile", "email"]) @map("oidc_scopes")
+
+  // Domain settings
+  allowedDomains  String[] @default([]) @map("allowed_domains")
+  autoProvision   Boolean  @default(true) @map("auto_provision")
+  defaultRole     String   @default("member") @map("default_role")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("sso_configs")
+}
+
+model TeamInvite {
+  id            String    @id @default(uuid()) @db.Uuid
+  orgId         String    @map("org_id") @db.Uuid
+  email         String
+  role          String    @default("member")
+  invitedBy     String    @map("invited_by") @db.Uuid
+  token         String    @unique
+  status        String    @default("pending") // 'pending', 'accepted', 'expired', 'revoked'
+  expiresAt     DateTime  @map("expires_at")
+  acceptedAt    DateTime? @map("accepted_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([orgId, status])
+  @@index([email])
+  @@map("team_invites")
+}
+
+// ============================================
+// Visual Agent Builder (Phase 3)
+// ============================================
+
+model AgentGraph {
+  id            String   @id @default(uuid()) @db.Uuid
+  agentId       String   @unique @map("agent_id") @db.Uuid
+
+  // Graph structure
+  nodes         Json     @default("[]") // Array of node definitions
+  edges         Json     @default("[]") // Array of edge connections
+  viewport      Json?    // Saved viewport position/zoom
+
+  // Metadata
+  version       Int      @default(1)
+  isValid       Boolean  @default(false) @map("is_valid")
+  validationErrors Json? @map("validation_errors")
+
+  // Generated code cache
+  generatedCode String?  @map("generated_code") @db.Text
+  codeLanguage  String?  @map("code_language") // 'typescript', 'python'
+  lastGenerated DateTime? @map("last_generated")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@map("agent_graphs")
+}
+
+// ============================================
+// Advanced Analytics (Phase 3)
+// ============================================
+
+model AnalyticsSnapshot {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  snapshotType    String   @map("snapshot_type") // 'daily', 'weekly', 'monthly'
+  periodStart     DateTime @map("period_start")
+  periodEnd       DateTime @map("period_end")
+
+  // Usage metrics
+  totalRequests   BigInt   @default(0) @map("total_requests")
+  totalTokensIn   BigInt   @default(0) @map("total_tokens_in")
+  totalTokensOut  BigInt   @default(0) @map("total_tokens_out")
+  totalCostCents  BigInt   @default(0) @map("total_cost_cents")
+
+  // Performance metrics
+  avgLatencyMs    Float?   @map("avg_latency_ms")
+  p50LatencyMs    Float?   @map("p50_latency_ms")
+  p95LatencyMs    Float?   @map("p95_latency_ms")
+  p99LatencyMs    Float?   @map("p99_latency_ms")
+  errorRate       Float?   @map("error_rate")
+
+  // Deployment breakdown
+  deploymentStats Json?    @map("deployment_stats") // { [deploymentId]: { requests, tokens, cost } }
+  agentStats      Json?    @map("agent_stats") // { [agentId]: { requests, tokens, cost } }
+  modelStats      Json?    @map("model_stats") // { [modelId]: { requests, tokens, cost } }
+
+  // Cost breakdown
+  costByGpuTier   Json?    @map("cost_by_gpu_tier")
+  costByModel     Json?    @map("cost_by_model")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([orgId, snapshotType, periodStart])
+  @@index([orgId, snapshotType, periodStart])
+  @@map("analytics_snapshots")
 }

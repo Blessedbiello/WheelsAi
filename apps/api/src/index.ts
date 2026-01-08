@@ -18,6 +18,7 @@ import { settingsRoutes } from "./routes/settings.js";
 import { agentRoutes } from "./routes/agents.js";
 import { trainingRoutes } from "./routes/training.js";
 import { marketplaceRoutes } from "./routes/marketplace.js";
+import { reputationRoutes } from "./routes/reputation.js";
 
 async function main() {
   const app = Fastify({
@@ -55,6 +56,7 @@ async function main() {
   await app.register(billingRoutes, { prefix: "/api/billing" });
   await app.register(settingsRoutes, { prefix: "/api/settings" });
   await app.register(marketplaceRoutes, { prefix: "/api/marketplace" });
+  await app.register(reputationRoutes, { prefix: "/api/reputation" });
   await app.register(inferenceRoutes); // OpenAI-compatible API at /v1/*
 
   // Global error handler
