@@ -14,6 +14,7 @@ import {
   Settings,
   MessageSquare,
   LogOut,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +24,7 @@ const navigation = [
   { name: "Agents", href: "/dashboard/agents", icon: Bot },
   { name: "Marketplace", href: "/dashboard/marketplace", icon: Store },
   { name: "Training", href: "/dashboard/training", icon: GraduationCap },
+  { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Models", href: "/dashboard/models", icon: Cpu },
   { name: "Playground", href: "/dashboard/playground", icon: MessageSquare },
   { name: "API Keys", href: "/dashboard/keys", icon: Key },

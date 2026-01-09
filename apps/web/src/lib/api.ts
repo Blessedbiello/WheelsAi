@@ -1147,4 +1147,111 @@ export const reputationApi = {
     ),
 };
 
+// ============================================
+// Analytics API
+// ============================================
+
+export interface UsageMetrics {
+  totalRequests: number;
+  totalTokensIn: number;
+  totalTokensOut: number;
+  totalCostCents: number;
+  avgLatencyMs: number;
+  errorRate: number;
+}
+
+export interface TimeSeriesPoint {
+  timestamp: string;
+  requests: number;
+  tokensIn: number;
+  tokensOut: number;
+  costCents: number;
+  errors: number;
+}
+
+export interface DeploymentMetrics {
+  deploymentId: string;
+  deploymentName: string;
+  modelId: string;
+  status: string;
+  requests: number;
+  tokensIn: number;
+  tokensOut: number;
+  costCents: number;
+  avgLatencyMs: number;
+  errorRate: number;
+}
+
+export interface CostBreakdown {
+  byModel: Array<{ modelId: string; costCents: number; requests: number }>;
+  byGpu: Array<{ gpuTier: string; costCents: number; requests: number }>;
+}
+
+export interface CostProjection {
+  currentSpend: number;
+  projectedSpend: number;
+  daysRemaining: number;
+  dailyAverage: number;
+}
+
+export interface SpendingAlert {
+  type: "warning" | "critical";
+  message: string;
+  percentage: number;
+}
+
+export interface AnalyticsDashboard {
+  overview: UsageMetrics;
+  timeseries: TimeSeriesPoint[];
+  deployments: DeploymentMetrics[];
+  costBreakdown: CostBreakdown;
+  projection: CostProjection;
+}
+
+export const analyticsApi = {
+  getOverview: (days = 30) =>
+    api<{ success: boolean; data: UsageMetrics; period: { days: number } }>(
+      `/api/analytics/overview?days=${days}`
+    ),
+
+  getTimeSeries: (days = 30, granularity: "hourly" | "daily" = "daily") =>
+    api<{
+      success: boolean;
+      data: TimeSeriesPoint[];
+      period: { days: number; granularity: string };
+    }>(`/api/analytics/timeseries?days=${days}&granularity=${granularity}`),
+
+  getDeploymentMetrics: (days = 30) =>
+    api<{ success: boolean; data: DeploymentMetrics[]; period: { days: number } }>(
+      `/api/analytics/deployments?days=${days}`
+    ),
+
+  getCostByModel: (days = 30) =>
+    api<{
+      success: boolean;
+      data: Array<{ modelId: string; costCents: number; requests: number }>;
+      period: { days: number };
+    }>(`/api/analytics/costs/by-model?days=${days}`),
+
+  getCostByGpu: (days = 30) =>
+    api<{
+      success: boolean;
+      data: Array<{ gpuTier: string; costCents: number; requests: number }>;
+      period: { days: number };
+    }>(`/api/analytics/costs/by-gpu?days=${days}`),
+
+  getProjection: () =>
+    api<{ success: boolean; data: CostProjection }>("/api/analytics/projection"),
+
+  getAlerts: (budgetUsd = 100) =>
+    api<{ success: boolean; data: SpendingAlert[] }>(
+      `/api/analytics/alerts?budget=${budgetUsd}`
+    ),
+
+  getDashboard: (days = 30) =>
+    api<{ success: boolean; data: AnalyticsDashboard; period: { days: number } }>(
+      `/api/analytics/dashboard?days=${days}`
+    ),
+};
+
 export { ApiError };
