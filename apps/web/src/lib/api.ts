@@ -1417,4 +1417,131 @@ export const enterpriseApi = {
     }),
 };
 
+// ============================================
+// Agent Graph API (Visual Builder)
+// ============================================
+
+export type GraphNodeType =
+  | "input"
+  | "output"
+  | "llm"
+  | "tool"
+  | "condition"
+  | "loop"
+  | "memory"
+  | "transform"
+  | "api"
+  | "code"
+  | "delay"
+  | "parallel"
+  | "merge";
+
+export interface GraphNode {
+  id: string;
+  type: GraphNodeType;
+  position: { x: number; y: number };
+  data: {
+    label: string;
+    config: Record<string, any>;
+    inputs?: string[];
+    outputs?: string[];
+  };
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+  label?: string;
+  animated?: boolean;
+}
+
+export interface GraphViewport {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export interface AgentGraph {
+  agentId: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  viewport?: GraphViewport;
+  version: number;
+}
+
+export interface GraphTemplate {
+  id: string;
+  name: string;
+  nodeCount: number;
+  description: string;
+}
+
+export interface GraphValidation {
+  valid: boolean;
+  issues: Array<{ type: "error" | "warning"; message: string }>;
+}
+
+export interface CompiledGraph {
+  agentId: string;
+  entryPoints: string[];
+  exitPoints: string[];
+  executionOrder: string[];
+  nodes: Record<string, GraphNode>;
+  edges: Record<string, GraphEdge>;
+}
+
+export const agentGraphApi = {
+  // Get agent graph
+  getGraph: (agentId: string) =>
+    api<{ success: boolean; data: AgentGraph }>(`/api/agents/${agentId}/graph`),
+
+  // Save agent graph
+  saveGraph: (
+    agentId: string,
+    data: { nodes: GraphNode[]; edges: GraphEdge[]; viewport?: GraphViewport }
+  ) =>
+    api<{ success: boolean; data: AgentGraph; message: string }>(
+      `/api/agents/${agentId}/graph`,
+      { method: "PUT", body: data }
+    ),
+
+  // Delete agent graph
+  deleteGraph: (agentId: string) =>
+    api<{ success: boolean; message: string }>(
+      `/api/agents/${agentId}/graph`,
+      { method: "DELETE" }
+    ),
+
+  // Get available templates
+  getTemplates: () =>
+    api<{ success: boolean; data: GraphTemplate[] }>("/api/graph-templates"),
+
+  // Apply template to agent
+  applyTemplate: (agentId: string, templateId: string) =>
+    api<{ success: boolean; data: AgentGraph; message: string }>(
+      `/api/agents/${agentId}/graph/template`,
+      { method: "POST", body: { templateId } }
+    ),
+
+  // Validate graph
+  validateGraph: (
+    agentId: string,
+    data: { nodes: GraphNode[]; edges: GraphEdge[] }
+  ) =>
+    api<{ success: boolean; data: GraphValidation }>(
+      `/api/agents/${agentId}/graph/validate`,
+      { method: "POST", body: data }
+    ),
+
+  // Compile graph for execution
+  compileGraph: (agentId: string) =>
+    api<{ success: boolean; data: CompiledGraph; message: string }>(
+      `/api/agents/${agentId}/graph/compile`,
+      { method: "POST" }
+    ),
+};
+
 export { ApiError };

@@ -16,6 +16,7 @@ import {
   Copy,
   ExternalLink,
   AlertTriangle,
+  Workflow,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -209,6 +210,12 @@ export default function AgentDetailPage() {
               </div>
 
               <div className="flex gap-2">
+                <Link href={`/dashboard/agents/${agentId}/builder`}>
+                  <Button variant="outline">
+                    <Workflow className="mr-2 h-4 w-4" />
+                    Visual Builder
+                  </Button>
+                </Link>
                 {isRunning ? (
                   <Button
                     variant="destructive"
