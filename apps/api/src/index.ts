@@ -22,6 +22,7 @@ import { reputationRoutes } from "./routes/reputation.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { enterpriseRoutes } from "./routes/enterprise.js";
 import { agentGraphRoutes } from "./routes/agentGraph.js";
+import { monitoringRoutes } from "./routes/monitoring.js";
 
 async function main() {
   const app = Fastify({
@@ -63,6 +64,7 @@ async function main() {
   await app.register(analyticsRoutes, { prefix: "/api/analytics" });
   await app.register(enterpriseRoutes, { prefix: "/api/enterprise" });
   await app.register(agentGraphRoutes, { prefix: "/api" }); // Graph routes at /api/agents/:id/graph
+  await app.register(monitoringRoutes, { prefix: "/api/monitoring" });
   await app.register(inferenceRoutes); // OpenAI-compatible API at /v1/*
 
   // Global error handler

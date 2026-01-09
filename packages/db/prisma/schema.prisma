@@ -831,3 +831,179 @@ model AnalyticsSnapshot {
   @@index([orgId, snapshotType, periodStart])
   @@map("analytics_snapshots")
 }
+
+// ============================================
+// Monitoring & Alerting (Phase 4)
+// ============================================
+
+model AlertChannel {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  name          String
+  type          String   // 'slack', 'discord', 'email', 'webhook', 'pagerduty'
+
+  // Channel configuration (encrypted for webhooks)
+  config        Json     // { webhookUrl, email, slackChannel, etc. }
+
+  isEnabled     Boolean  @default(true) @map("is_enabled")
+  lastTestedAt  DateTime? @map("last_tested_at")
+  lastError     String?  @map("last_error")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  alertRules    AlertRuleChannel[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("alert_channels")
+}
+
+model AlertRule {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  name            String
+  description     String?
+
+  // Rule type and target
+  ruleType        String   @map("rule_type") // 'threshold', 'anomaly', 'uptime', 'budget'
+  resourceType    String   @map("resource_type") // 'deployment', 'agent', 'organization'
+  resourceId      String?  @map("resource_id") @db.Uuid // null = all resources
+
+  // Condition
+  metric          String   // 'error_rate', 'latency_p95', 'request_count', 'cost', 'uptime'
+  operator        String   // 'gt', 'gte', 'lt', 'lte', 'eq'
+  threshold       Float    // Threshold value
+  windowMinutes   Int      @default(5) @map("window_minutes") // Evaluation window
+
+  // Alert settings
+  severity        String   @default("warning") // 'info', 'warning', 'critical'
+  cooldownMinutes Int      @default(60) @map("cooldown_minutes") // Min time between alerts
+
+  isEnabled       Boolean  @default(true) @map("is_enabled")
+  lastTriggeredAt DateTime? @map("last_triggered_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  channels        AlertRuleChannel[]
+  alerts          Alert[]
+
+  @@unique([orgId, name])
+  @@index([orgId, isEnabled])
+  @@index([resourceType, resourceId])
+  @@map("alert_rules")
+}
+
+model AlertRuleChannel {
+  ruleId    String @map("rule_id") @db.Uuid
+  channelId String @map("channel_id") @db.Uuid
+
+  rule      AlertRule    @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  channel   AlertChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([ruleId, channelId])
+  @@map("alert_rule_channels")
+}
+
+model Alert {
+  id              String    @id @default(uuid()) @db.Uuid
+  orgId           String    @map("org_id") @db.Uuid
+  ruleId          String    @map("rule_id") @db.Uuid
+
+  // Alert details
+  status          String    @default("active") // 'active', 'acknowledged', 'resolved'
+  severity        String    // 'info', 'warning', 'critical'
+  title           String
+  message         String    @db.Text
+
+  // Context
+  resourceType    String    @map("resource_type")
+  resourceId      String?   @map("resource_id") @db.Uuid
+  metricValue     Float     @map("metric_value") // The value that triggered the alert
+  threshold       Float     // The threshold that was breached
+
+  // Timeline
+  triggeredAt     DateTime  @default(now()) @map("triggered_at")
+  acknowledgedAt  DateTime? @map("acknowledged_at")
+  acknowledgedBy  String?   @map("acknowledged_by") @db.Uuid
+  resolvedAt      DateTime? @map("resolved_at")
+  resolvedBy      String?   @map("resolved_by") @db.Uuid
+
+  // Notification tracking
+  notificationsSent Json?   @map("notifications_sent") // { [channelId]: { sentAt, success, error } }
+
+  rule            AlertRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([orgId, triggeredAt])
+  @@index([ruleId, status])
+  @@map("alerts")
+}
+
+model UptimeMonitor {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+  name            String
+
+  // Target configuration
+  targetType      String   @map("target_type") // 'deployment', 'agent', 'custom_url'
+  targetId        String?  @map("target_id") @db.Uuid
+  targetUrl       String?  @map("target_url") // For custom URLs
+
+  // Check configuration
+  checkIntervalSeconds Int @default(60) @map("check_interval_seconds")
+  timeoutSeconds  Int      @default(30) @map("timeout_seconds")
+  httpMethod      String   @default("GET") @map("http_method")
+  expectedStatus  Int      @default(200) @map("expected_status")
+  expectedBody    String?  @map("expected_body") // Optional substring to check
+  headers         Json?    // Custom headers for the check
+
+  // Status
+  isEnabled       Boolean  @default(true) @map("is_enabled")
+  currentStatus   String   @default("unknown") @map("current_status") // 'up', 'down', 'degraded', 'unknown'
+  lastCheckAt     DateTime? @map("last_check_at")
+  lastUpAt        DateTime? @map("last_up_at")
+  lastDownAt      DateTime? @map("last_down_at")
+
+  // Stats
+  uptimePercent24h Float?  @map("uptime_percent_24h")
+  uptimePercent7d  Float?  @map("uptime_percent_7d")
+  uptimePercent30d Float?  @map("uptime_percent_30d")
+  avgLatencyMs    Float?   @map("avg_latency_ms")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  events          UptimeEvent[]
+
+  @@unique([orgId, name])
+  @@index([orgId, isEnabled])
+  @@map("uptime_monitors")
+}
+
+model UptimeEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  monitorId       String   @map("monitor_id") @db.Uuid
+
+  // Check result
+  status          String   // 'up', 'down', 'degraded', 'timeout', 'error'
+  statusCode      Int?     @map("status_code")
+  latencyMs       Int?     @map("latency_ms")
+  errorMessage    String?  @map("error_message")
+
+  // Response details
+  responseBody    String?  @map("response_body") @db.Text // Stored only on errors
+  responseHeaders Json?    @map("response_headers")
+
+  // Location (for distributed checks)
+  checkRegion     String?  @map("check_region") // 'us-east', 'eu-west', etc.
+
+  checkedAt       DateTime @default(now()) @map("checked_at")
+
+  monitor         UptimeMonitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@index([monitorId, checkedAt])
+  @@index([monitorId, status])
+  @@map("uptime_events")
+}

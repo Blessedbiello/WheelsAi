@@ -1544,4 +1544,297 @@ export const agentGraphApi = {
     ),
 };
 
+// ============================================
+// Monitoring & Alerting API
+// ============================================
+
+export type ChannelType = "slack" | "discord" | "email" | "webhook" | "pagerduty";
+export type Severity = "info" | "warning" | "critical";
+export type AlertStatus = "active" | "acknowledged" | "resolved";
+
+export interface AlertChannel {
+  id: string;
+  orgId: string;
+  name: string;
+  type: ChannelType;
+  config: Record<string, any>;
+  isEnabled: boolean;
+  lastTestedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AlertRule {
+  id: string;
+  orgId: string;
+  name: string;
+  description: string | null;
+  ruleType: string;
+  resourceType: string;
+  resourceId: string | null;
+  metric: string;
+  operator: string;
+  threshold: number;
+  windowMinutes: number;
+  severity: Severity;
+  cooldownMinutes: number;
+  isEnabled: boolean;
+  lastTriggeredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  channels?: Array<{ channel: AlertChannel }>;
+  _count?: { alerts: number };
+}
+
+export interface Alert {
+  id: string;
+  orgId: string;
+  ruleId: string;
+  status: AlertStatus;
+  severity: Severity;
+  title: string;
+  message: string;
+  resourceType: string;
+  resourceId: string | null;
+  metricValue: number;
+  threshold: number;
+  triggeredAt: string;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  rule?: { name: string; resourceType: string };
+}
+
+export interface UptimeMonitor {
+  id: string;
+  orgId: string;
+  name: string;
+  targetType: string;
+  targetId: string | null;
+  targetUrl: string | null;
+  checkIntervalSeconds: number;
+  timeoutSeconds: number;
+  httpMethod: string;
+  expectedStatus: number;
+  expectedBody: string | null;
+  headers: Record<string, string> | null;
+  isEnabled: boolean;
+  currentStatus: string;
+  lastCheckAt: string | null;
+  lastUpAt: string | null;
+  lastDownAt: string | null;
+  uptimePercent24h: number | null;
+  uptimePercent7d: number | null;
+  uptimePercent30d: number | null;
+  avgLatencyMs: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UptimeEvent {
+  id: string;
+  monitorId: string;
+  status: string;
+  statusCode: number | null;
+  latencyMs: number | null;
+  errorMessage: string | null;
+  checkRegion: string | null;
+  checkedAt: string;
+}
+
+export interface AlertStats {
+  byStatus: Array<{ status: string; count: number }>;
+  bySeverity: Array<{ severity: string; count: number }>;
+  topRules: Array<{ ruleId: string; count: number }>;
+  totalRecent: number;
+}
+
+export interface UptimeSummary {
+  totalMonitors: number;
+  totalUp: number;
+  totalDown: number;
+  avgUptime24h: number | null;
+  monitors: Array<{
+    id: string;
+    name: string;
+    targetType: string;
+    currentStatus: string;
+    uptimePercent24h: number | null;
+    avgLatencyMs: number | null;
+    lastCheckAt: string | null;
+  }>;
+}
+
+export interface CreateAlertChannelInput {
+  name: string;
+  type: ChannelType;
+  config: Record<string, any>;
+}
+
+export interface CreateAlertRuleInput {
+  name: string;
+  description?: string;
+  ruleType: "threshold" | "anomaly" | "uptime" | "budget";
+  resourceType: "deployment" | "agent" | "organization";
+  resourceId?: string;
+  metric: string;
+  operator: "gt" | "gte" | "lt" | "lte" | "eq";
+  threshold: number;
+  windowMinutes?: number;
+  severity?: Severity;
+  cooldownMinutes?: number;
+  channelIds: string[];
+}
+
+export interface CreateUptimeMonitorInput {
+  name: string;
+  targetType: "deployment" | "agent" | "custom_url";
+  targetId?: string;
+  targetUrl?: string;
+  checkIntervalSeconds?: number;
+  timeoutSeconds?: number;
+  httpMethod?: string;
+  expectedStatus?: number;
+  expectedBody?: string;
+  headers?: Record<string, string>;
+}
+
+export const monitoringApi = {
+  // Alert Channels
+  getChannels: () =>
+    api<{ success: boolean; data: AlertChannel[] }>("/api/monitoring/channels"),
+
+  createChannel: (input: CreateAlertChannelInput) =>
+    api<{ success: boolean; data: AlertChannel; message: string }>(
+      "/api/monitoring/channels",
+      { method: "POST", body: input }
+    ),
+
+  updateChannel: (
+    channelId: string,
+    updates: Partial<CreateAlertChannelInput> & { isEnabled?: boolean }
+  ) =>
+    api<{ success: boolean; data: AlertChannel; message: string }>(
+      `/api/monitoring/channels/${channelId}`,
+      { method: "PATCH", body: updates }
+    ),
+
+  deleteChannel: (channelId: string) =>
+    api<{ success: boolean; message: string }>(
+      `/api/monitoring/channels/${channelId}`,
+      { method: "DELETE" }
+    ),
+
+  testChannel: (channelId: string) =>
+    api<{ success: boolean; message: string }>(
+      `/api/monitoring/channels/${channelId}/test`,
+      { method: "POST" }
+    ),
+
+  // Alert Rules
+  getRules: () =>
+    api<{ success: boolean; data: AlertRule[] }>("/api/monitoring/rules"),
+
+  getRule: (ruleId: string) =>
+    api<{ success: boolean; data: AlertRule }>(`/api/monitoring/rules/${ruleId}`),
+
+  createRule: (input: CreateAlertRuleInput) =>
+    api<{ success: boolean; data: AlertRule; message: string }>(
+      "/api/monitoring/rules",
+      { method: "POST", body: input }
+    ),
+
+  updateRule: (ruleId: string, updates: Partial<CreateAlertRuleInput>) =>
+    api<{ success: boolean; data: AlertRule; message: string }>(
+      `/api/monitoring/rules/${ruleId}`,
+      { method: "PATCH", body: updates }
+    ),
+
+  deleteRule: (ruleId: string) =>
+    api<{ success: boolean; message: string }>(
+      `/api/monitoring/rules/${ruleId}`,
+      { method: "DELETE" }
+    ),
+
+  toggleRule: (ruleId: string, isEnabled: boolean) =>
+    api<{ success: boolean; data: AlertRule; message: string }>(
+      `/api/monitoring/rules/${ruleId}/toggle`,
+      { method: "POST", body: { isEnabled } }
+    ),
+
+  // Alerts
+  getAlerts: (params?: {
+    status?: string;
+    severity?: string;
+    ruleId?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.severity) searchParams.set("severity", params.severity);
+    if (params?.ruleId) searchParams.set("ruleId", params.ruleId);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return api<{
+      success: boolean;
+      data: Alert[];
+      pagination: { total: number; limit: number; offset: number };
+    }>(`/api/monitoring/alerts${query ? `?${query}` : ""}`);
+  },
+
+  acknowledgeAlert: (alertId: string) =>
+    api<{ success: boolean; data: Alert; message: string }>(
+      `/api/monitoring/alerts/${alertId}/acknowledge`,
+      { method: "POST" }
+    ),
+
+  resolveAlert: (alertId: string) =>
+    api<{ success: boolean; data: Alert; message: string }>(
+      `/api/monitoring/alerts/${alertId}/resolve`,
+      { method: "POST" }
+    ),
+
+  getAlertStats: (days = 7) =>
+    api<{ success: boolean; data: AlertStats }>(
+      `/api/monitoring/alerts/stats?days=${days}`
+    ),
+
+  // Uptime Monitoring
+  getUptimeSummary: () =>
+    api<{ success: boolean; data: UptimeSummary }>("/api/monitoring/uptime/summary"),
+
+  getUptimeMonitors: () =>
+    api<{ success: boolean; data: UptimeMonitor[] }>("/api/monitoring/uptime"),
+
+  getUptimeMonitor: (monitorId: string) =>
+    api<{ success: boolean; data: UptimeMonitor & { events: UptimeEvent[] } }>(
+      `/api/monitoring/uptime/${monitorId}`
+    ),
+
+  createUptimeMonitor: (input: CreateUptimeMonitorInput) =>
+    api<{ success: boolean; data: UptimeMonitor; message: string }>(
+      "/api/monitoring/uptime",
+      { method: "POST", body: input }
+    ),
+
+  updateUptimeMonitor: (
+    monitorId: string,
+    updates: Partial<CreateUptimeMonitorInput> & { isEnabled?: boolean }
+  ) =>
+    api<{ success: boolean; data: UptimeMonitor; message: string }>(
+      `/api/monitoring/uptime/${monitorId}`,
+      { method: "PATCH", body: updates }
+    ),
+
+  deleteUptimeMonitor: (monitorId: string) =>
+    api<{ success: boolean; message: string }>(
+      `/api/monitoring/uptime/${monitorId}`,
+      { method: "DELETE" }
+    ),
+};
+
 export { ApiError };
