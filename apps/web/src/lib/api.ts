@@ -1254,4 +1254,167 @@ export const analyticsApi = {
     ),
 };
 
+// ============================================
+// Enterprise API
+// ============================================
+
+export interface AuditLogEntry {
+  id: string;
+  orgId: string;
+  userId: string | null;
+  action: string;
+  resource: string;
+  resourceId: string | null;
+  details: Record<string, any> | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  status: string;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface TeamMember {
+  userId: string;
+  role: string;
+  email: string | null;
+  displayName: string | null;
+  walletAddress: string | null;
+  joinedAt: string;
+}
+
+export interface TeamInvite {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface SsoConfig {
+  provider: string;
+  enabled: boolean;
+  samlEntityId: string | null;
+  samlSsoUrl: string | null;
+  oidcClientId: string | null;
+  oidcIssuer: string | null;
+  oidcScopes: string[];
+  allowedDomains: string[];
+  autoProvision: boolean;
+  defaultRole: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const enterpriseApi = {
+  // Audit Logs
+  getAuditLogs: (params?: {
+    action?: string;
+    resource?: string;
+    userId?: string;
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.action) searchParams.set("action", params.action);
+    if (params?.resource) searchParams.set("resource", params.resource);
+    if (params?.userId) searchParams.set("userId", params.userId);
+    if (params?.startDate) searchParams.set("startDate", params.startDate);
+    if (params?.endDate) searchParams.set("endDate", params.endDate);
+    if (params?.page) searchParams.set("page", params.page.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return api<{
+      success: boolean;
+      data: AuditLogEntry[];
+      pagination: { page: number; limit: number; total: number; totalPages: number };
+    }>(`/api/enterprise/audit-logs${query ? `?${query}` : ""}`);
+  },
+
+  getAuditLogSummary: (days = 30) =>
+    api<{ success: boolean; data: Array<{ action: string; count: number }> }>(
+      `/api/enterprise/audit-logs/summary?days=${days}`
+    ),
+
+  // Team Management
+  getTeamMembers: () =>
+    api<{ success: boolean; data: TeamMember[] }>("/api/enterprise/team"),
+
+  getPendingInvites: () =>
+    api<{ success: boolean; data: TeamInvite[] }>("/api/enterprise/team/invites"),
+
+  createTeamInvite: (email: string, role?: string) =>
+    api<{ success: boolean; data: TeamInvite; message: string }>(
+      "/api/enterprise/team/invites",
+      { method: "POST", body: { email, role } }
+    ),
+
+  revokeInvite: (inviteId: string) =>
+    api<{ success: boolean; message: string }>(
+      `/api/enterprise/team/invites/${inviteId}`,
+      { method: "DELETE" }
+    ),
+
+  updateMemberRole: (memberId: string, role: string) =>
+    api<{ success: boolean; message: string }>(
+      `/api/enterprise/team/${memberId}/role`,
+      { method: "PATCH", body: { role } }
+    ),
+
+  removeMember: (memberId: string) =>
+    api<{ success: boolean; message: string }>(
+      `/api/enterprise/team/${memberId}`,
+      { method: "DELETE" }
+    ),
+
+  acceptInvite: (token: string) =>
+    api<{ success: boolean; data: { orgId: string; role: string }; message: string }>(
+      `/api/enterprise/team/invites/${token}/accept`,
+      { method: "POST" }
+    ),
+
+  // SSO Configuration
+  getSsoConfig: () =>
+    api<{ success: boolean; data: SsoConfig | null }>("/api/enterprise/sso"),
+
+  configureSamlSso: (config: {
+    entityId: string;
+    ssoUrl: string;
+    certificate: string;
+    allowedDomains?: string[];
+    autoProvision?: boolean;
+    defaultRole?: string;
+  }) =>
+    api<{ success: boolean; data: { provider: string; enabled: boolean }; message: string }>(
+      "/api/enterprise/sso/saml",
+      { method: "POST", body: config }
+    ),
+
+  configureOidcSso: (config: {
+    clientId: string;
+    clientSecret: string;
+    issuer: string;
+    scopes?: string[];
+    allowedDomains?: string[];
+    autoProvision?: boolean;
+    defaultRole?: string;
+  }) =>
+    api<{ success: boolean; data: { provider: string; enabled: boolean }; message: string }>(
+      "/api/enterprise/sso/oidc",
+      { method: "POST", body: config }
+    ),
+
+  disableSso: () =>
+    api<{ success: boolean; message: string }>("/api/enterprise/sso/disable", {
+      method: "POST",
+    }),
+
+  deleteSsoConfig: () =>
+    api<{ success: boolean; message: string }>("/api/enterprise/sso", {
+      method: "DELETE",
+    }),
+};
+
 export { ApiError };
