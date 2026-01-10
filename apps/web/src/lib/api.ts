@@ -1837,4 +1837,149 @@ export const monitoringApi = {
     ),
 };
 
+// ============================================
+// Agent Versioning API
+// ============================================
+
+export type ChangeType = "major" | "minor" | "patch";
+
+export interface AgentVersion {
+  id: string;
+  agentId: string;
+  version: string;
+  versionNumber: number;
+  name: string;
+  description: string | null;
+  framework: string;
+  systemPrompt: string | null;
+  tools: any[];
+  modelConfig: Record<string, any>;
+  sourceType: string;
+  sourceUrl: string | null;
+  sourceCode: string | null;
+  env: Record<string, any>;
+  graphNodes: any[] | null;
+  graphEdges: any[] | null;
+  changeLog: string | null;
+  changeType: string;
+  tags: string[];
+  createdById: string;
+  createdByName: string;
+  isLatest: boolean;
+  isPublished: boolean;
+  publishedAt: string | null;
+  createdAt: string;
+}
+
+export interface AgentVersionSummary {
+  id: string;
+  version: string;
+  versionNumber: number;
+  changeLog: string | null;
+  changeType: string;
+  tags: string[];
+  createdById: string;
+  createdByName: string;
+  isLatest: boolean;
+  isPublished: boolean;
+  createdAt: string;
+}
+
+export interface AgentVersionDiff {
+  id: string;
+  agentId: string;
+  fromVersion: string;
+  toVersion: string;
+  changes: Record<string, { from: any; to: any }>;
+  addedFields: string[];
+  removedFields: string[];
+  modifiedFields: string[];
+  linesAdded: number;
+  linesRemoved: number;
+  createdAt: string;
+}
+
+export interface VersionHistoryEntry extends AgentVersionSummary {
+  diff: {
+    addedFields: string[];
+    removedFields: string[];
+    modifiedFields: string[];
+    linesAdded: number;
+    linesRemoved: number;
+  } | null;
+}
+
+export interface CreateVersionInput {
+  changeLog?: string;
+  changeType?: ChangeType;
+  tags?: string[];
+}
+
+export const versioningApi = {
+  // Get all versions of an agent
+  getVersions: (agentId: string, params?: { limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return api<{ versions: AgentVersionSummary[]; total: number }>(
+      `/api/versioning/agents/${agentId}/versions${query ? `?${query}` : ""}`
+    );
+  },
+
+  // Get version history with diffs
+  getHistory: (agentId: string, limit = 10) =>
+    api<VersionHistoryEntry[]>(
+      `/api/versioning/agents/${agentId}/history?limit=${limit}`
+    ),
+
+  // Get a specific version
+  getVersion: (agentId: string, version: string) =>
+    api<AgentVersion>(`/api/versioning/agents/${agentId}/versions/${version}`),
+
+  // Get the latest version
+  getLatestVersion: (agentId: string) =>
+    api<AgentVersion>(`/api/versioning/agents/${agentId}/versions/latest`),
+
+  // Create a new version
+  createVersion: (agentId: string, input: CreateVersionInput = {}) =>
+    api<AgentVersion>(`/api/versioning/agents/${agentId}/versions`, {
+      method: "POST",
+      body: input,
+    }),
+
+  // Compare two versions
+  compareVersions: (agentId: string, fromVersion: string, toVersion: string) =>
+    api<AgentVersionDiff>(
+      `/api/versioning/agents/${agentId}/compare?from=${fromVersion}&to=${toVersion}`
+    ),
+
+  // Rollback to a specific version
+  rollbackToVersion: (agentId: string, version: string) =>
+    api<AgentVersion>(
+      `/api/versioning/agents/${agentId}/versions/${version}/rollback`,
+      { method: "POST" }
+    ),
+
+  // Tag a version
+  tagVersion: (agentId: string, version: string, tags: string[]) =>
+    api<AgentVersion>(
+      `/api/versioning/agents/${agentId}/versions/${version}/tag`,
+      { method: "POST", body: { tags } }
+    ),
+
+  // Publish a version
+  publishVersion: (agentId: string, version: string) =>
+    api<AgentVersion>(
+      `/api/versioning/agents/${agentId}/versions/${version}/publish`,
+      { method: "POST" }
+    ),
+
+  // Delete a version
+  deleteVersion: (agentId: string, version: string) =>
+    api<void>(`/api/versioning/agents/${agentId}/versions/${version}`, {
+      method: "DELETE",
+    }),
+};
+
 export { ApiError };

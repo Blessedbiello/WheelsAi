@@ -1007,3 +1007,74 @@ model UptimeEvent {
   @@index([monitorId, status])
   @@map("uptime_events")
 }
+
+// ============================================
+// Agent Versioning (Phase 4)
+// ============================================
+
+model AgentVersion {
+  id            String   @id @default(uuid()) @db.Uuid
+  agentId       String   @map("agent_id") @db.Uuid
+  version       String   // Semantic version: "1.0.0", "1.1.0", etc.
+  versionNumber Int      @map("version_number") // Auto-incrementing version number
+
+  // Snapshot of agent configuration at this version
+  name          String
+  description   String?
+  framework     String
+  systemPrompt  String?  @map("system_prompt") @db.Text
+  tools         Json     @default("[]")
+  modelConfig   Json     @map("model_config")
+  sourceType    String   @map("source_type")
+  sourceUrl     String?  @map("source_url")
+  sourceCode    String?  @map("source_code") @db.Text
+  env           Json     @default("{}")
+
+  // Graph snapshot (if visual builder was used)
+  graphNodes    Json?    @map("graph_nodes")
+  graphEdges    Json?    @map("graph_edges")
+
+  // Version metadata
+  changeLog     String?  @map("change_log") @db.Text // Description of changes
+  changeType    String   @map("change_type") // 'major', 'minor', 'patch'
+  tags          String[] @default([])
+
+  // Author
+  createdById   String   @map("created_by_id") @db.Uuid
+  createdByName String?  @map("created_by_name")
+
+  // Status
+  isLatest      Boolean  @default(false) @map("is_latest")
+  isPublished   Boolean  @default(false) @map("is_published") // Published to marketplace
+  publishedAt   DateTime? @map("published_at")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([agentId, version])
+  @@unique([agentId, versionNumber])
+  @@index([agentId, isLatest])
+  @@index([agentId, createdAt])
+  @@map("agent_versions")
+}
+
+model AgentVersionDiff {
+  id              String   @id @default(uuid()) @db.Uuid
+  agentId         String   @map("agent_id") @db.Uuid
+  fromVersion     String   @map("from_version")
+  toVersion       String   @map("to_version")
+
+  // Diff details
+  changes         Json     // { field: { from: ..., to: ... }, ... }
+  addedFields     String[] @default([]) @map("added_fields")
+  removedFields   String[] @default([]) @map("removed_fields")
+  modifiedFields  String[] @default([]) @map("modified_fields")
+
+  // Stats
+  linesAdded      Int      @default(0) @map("lines_added")
+  linesRemoved    Int      @default(0) @map("lines_removed")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([agentId, fromVersion, toVersion])
+  @@map("agent_version_diffs")
+}
