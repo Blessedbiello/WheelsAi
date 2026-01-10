@@ -1982,4 +1982,277 @@ export const versioningApi = {
     }),
 };
 
+// ============================================
+// Webhooks & Integrations API
+// ============================================
+
+export type WebhookEventType =
+  | "agent.created"
+  | "agent.updated"
+  | "agent.deleted"
+  | "agent.deployed"
+  | "agent.version.created"
+  | "deployment.started"
+  | "deployment.running"
+  | "deployment.stopped"
+  | "deployment.failed"
+  | "training.started"
+  | "training.completed"
+  | "training.failed"
+  | "alert.triggered"
+  | "alert.resolved"
+  | "billing.low_balance"
+  | "billing.payment_received";
+
+export type IntegrationType = "slack" | "discord" | "github" | "zapier" | "make" | "n8n";
+
+export interface Webhook {
+  id: string;
+  orgId: string;
+  name: string;
+  description: string | null;
+  url: string;
+  secret?: string;
+  events: string[];
+  resourceType: string | null;
+  resourceId: string | null;
+  isEnabled: boolean;
+  retryCount: number;
+  timeoutSeconds: number;
+  headers: Record<string, string> | null;
+  lastDeliveredAt: string | null;
+  lastFailedAt: string | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  webhookId: string;
+  eventType: string;
+  eventId: string;
+  payload: any;
+  attempt: number;
+  status: "pending" | "success" | "failed" | "retrying";
+  statusCode: number | null;
+  responseBody: string | null;
+  responseTimeMs: number | null;
+  errorMessage: string | null;
+  scheduledAt: string;
+  deliveredAt: string | null;
+  nextRetryAt: string | null;
+}
+
+export interface Integration {
+  id: string;
+  orgId: string;
+  type: IntegrationType;
+  name: string;
+  config: Record<string, any>;
+  scopes: string[];
+  isEnabled: boolean;
+  isConnected: boolean;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  externalId: string | null;
+  externalName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IntegrationEvent {
+  id: string;
+  integrationId: string;
+  eventType: string;
+  action: string;
+  inputPayload: any;
+  outputPayload: any;
+  status: "pending" | "success" | "failed";
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface AvailableIntegration {
+  type: string;
+  name: string;
+  description: string;
+  icon: string;
+  features: string[];
+  requiresOAuth: boolean;
+}
+
+export interface CreateWebhookInput {
+  name: string;
+  description?: string;
+  url: string;
+  events: string[];
+  resourceType?: string;
+  resourceId?: string;
+  headers?: Record<string, string>;
+  retryCount?: number;
+  timeoutSeconds?: number;
+}
+
+export interface CreateIntegrationInput {
+  type: IntegrationType;
+  name: string;
+  config?: Record<string, any>;
+  scopes?: string[];
+}
+
+export const webhooksApi = {
+  // Webhook Events
+  getEvents: () =>
+    api<{
+      events: WebhookEventType[];
+      categories: Record<string, WebhookEventType[]>;
+    }>("/api/webhooks/events"),
+
+  // Webhooks
+  getWebhooks: (params?: { limit?: number; offset?: number; isEnabled?: boolean }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    if (params?.isEnabled !== undefined) searchParams.set("isEnabled", params.isEnabled.toString());
+    const query = searchParams.toString();
+    return api<{ webhooks: Webhook[]; total: number }>(
+      `/api/webhooks${query ? `?${query}` : ""}`
+    );
+  },
+
+  getWebhook: (webhookId: string) =>
+    api<Webhook & { deliveries: WebhookDelivery[] }>(`/api/webhooks/${webhookId}`),
+
+  createWebhook: (input: CreateWebhookInput) =>
+    api<Webhook>("/api/webhooks", {
+      method: "POST",
+      body: input,
+    }),
+
+  updateWebhook: (
+    webhookId: string,
+    updates: Partial<CreateWebhookInput> & { isEnabled?: boolean }
+  ) =>
+    api<Webhook>(`/api/webhooks/${webhookId}`, {
+      method: "PATCH",
+      body: updates,
+    }),
+
+  deleteWebhook: (webhookId: string) =>
+    api<void>(`/api/webhooks/${webhookId}`, { method: "DELETE" }),
+
+  regenerateSecret: (webhookId: string) =>
+    api<{ id: string; secret: string }>(
+      `/api/webhooks/${webhookId}/regenerate-secret`,
+      { method: "POST" }
+    ),
+
+  testWebhook: (webhookId: string) =>
+    api<{
+      success: boolean;
+      statusCode?: number;
+      responseTimeMs: number;
+      error?: string;
+      deliveryId: string;
+    }>(`/api/webhooks/${webhookId}/test`, { method: "POST" }),
+
+  // Webhook Deliveries
+  getDeliveries: (
+    webhookId: string,
+    params?: { limit?: number; offset?: number; status?: string }
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    if (params?.status) searchParams.set("status", params.status);
+    const query = searchParams.toString();
+    return api<{ deliveries: WebhookDelivery[]; total: number }>(
+      `/api/webhooks/${webhookId}/deliveries${query ? `?${query}` : ""}`
+    );
+  },
+
+  retryDelivery: (webhookId: string, deliveryId: string) =>
+    api<{ message: string }>(
+      `/api/webhooks/${webhookId}/deliveries/${deliveryId}/retry`,
+      { method: "POST" }
+    ),
+};
+
+export const integrationsApi = {
+  // Available Integrations
+  getAvailable: () =>
+    api<{ integrations: AvailableIntegration[]; types: IntegrationType[] }>(
+      "/api/integrations/available"
+    ),
+
+  // Integrations
+  getIntegrations: (params?: {
+    type?: IntegrationType;
+    isEnabled?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.type) searchParams.set("type", params.type);
+    if (params?.isEnabled !== undefined) searchParams.set("isEnabled", params.isEnabled.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return api<{ integrations: Integration[]; total: number }>(
+      `/api/integrations${query ? `?${query}` : ""}`
+    );
+  },
+
+  getIntegration: (integrationId: string) =>
+    api<Integration>(`/api/integrations/${integrationId}`),
+
+  createIntegration: (input: CreateIntegrationInput) =>
+    api<Integration>("/api/integrations", {
+      method: "POST",
+      body: input,
+    }),
+
+  updateIntegration: (
+    integrationId: string,
+    updates: Partial<Omit<CreateIntegrationInput, "type">> & { isEnabled?: boolean }
+  ) =>
+    api<Integration>(`/api/integrations/${integrationId}`, {
+      method: "PATCH",
+      body: updates,
+    }),
+
+  deleteIntegration: (integrationId: string) =>
+    api<void>(`/api/integrations/${integrationId}`, { method: "DELETE" }),
+
+  disconnectIntegration: (integrationId: string) =>
+    api<Integration>(`/api/integrations/${integrationId}/disconnect`, {
+      method: "POST",
+    }),
+
+  // Integration Events
+  getEvents: (
+    integrationId: string,
+    params?: { limit?: number; offset?: number; status?: string; action?: string }
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    if (params?.status) searchParams.set("status", params.status);
+    if (params?.action) searchParams.set("action", params.action);
+    const query = searchParams.toString();
+    return api<{ events: IntegrationEvent[]; total: number }>(
+      `/api/integrations/${integrationId}/events${query ? `?${query}` : ""}`
+    );
+  },
+
+  testIntegration: (integrationId: string, action: string, payload?: Record<string, any>) =>
+    api<{ success: boolean; result: any }>(
+      `/api/integrations/${integrationId}/test`,
+      { method: "POST", body: { action, payload } }
+    ),
+};
+
 export { ApiError };

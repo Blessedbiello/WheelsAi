@@ -24,6 +24,7 @@ import { enterpriseRoutes } from "./routes/enterprise.js";
 import { agentGraphRoutes } from "./routes/agentGraph.js";
 import { monitoringRoutes } from "./routes/monitoring.js";
 import { versioningRoutes } from "./routes/versioning.js";
+import { webhooksRoutes } from "./routes/webhooks.js";
 
 async function main() {
   const app = Fastify({
@@ -67,6 +68,7 @@ async function main() {
   await app.register(agentGraphRoutes, { prefix: "/api" }); // Graph routes at /api/agents/:id/graph
   await app.register(monitoringRoutes, { prefix: "/api/monitoring" });
   await app.register(versioningRoutes, { prefix: "/api/versioning" });
+  await app.register(webhooksRoutes, { prefix: "/api" });
   await app.register(inferenceRoutes); // OpenAI-compatible API at /v1/*
 
   // Global error handler

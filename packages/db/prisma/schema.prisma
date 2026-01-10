@@ -1078,3 +1078,137 @@ model AgentVersionDiff {
   @@unique([agentId, fromVersion, toVersion])
   @@map("agent_version_diffs")
 }
+
+// ============================================
+// Webhooks & Integrations (Phase 4)
+// ============================================
+
+model Webhook {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  name          String
+  description   String?
+
+  // Endpoint configuration
+  url           String
+  secret        String   // HMAC secret for signature verification
+
+  // Event configuration
+  events        String[] @default([]) // 'agent.created', 'agent.deployed', 'deployment.started', etc.
+
+  // Filters
+  resourceType  String?  @map("resource_type") // 'agent', 'deployment', 'training', etc.
+  resourceId    String?  @map("resource_id") @db.Uuid // Specific resource to watch
+
+  // Settings
+  isEnabled     Boolean  @default(true) @map("is_enabled")
+  retryCount    Int      @default(3) @map("retry_count")
+  timeoutSeconds Int     @default(30) @map("timeout_seconds")
+  headers       Json?    // Custom headers to include
+
+  // Status
+  lastDeliveredAt DateTime? @map("last_delivered_at")
+  lastFailedAt    DateTime? @map("last_failed_at")
+  lastError       String?   @map("last_error")
+  consecutiveFailures Int   @default(0) @map("consecutive_failures")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  deliveries    WebhookDelivery[]
+
+  @@unique([orgId, name])
+  @@index([orgId, isEnabled])
+  @@index([orgId, events])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id            String   @id @default(uuid()) @db.Uuid
+  webhookId     String   @map("webhook_id") @db.Uuid
+
+  // Event data
+  eventType     String   @map("event_type")
+  eventId       String   @map("event_id") // Unique event ID for idempotency
+  payload       Json     // The webhook payload
+
+  // Delivery attempt
+  attempt       Int      @default(1)
+  status        String   @default("pending") // 'pending', 'success', 'failed', 'retrying'
+
+  // Response
+  statusCode    Int?     @map("status_code")
+  responseBody  String?  @map("response_body") @db.Text
+  responseTimeMs Int?    @map("response_time_ms")
+  errorMessage  String?  @map("error_message")
+
+  // Timing
+  scheduledAt   DateTime @default(now()) @map("scheduled_at")
+  deliveredAt   DateTime? @map("delivered_at")
+  nextRetryAt   DateTime? @map("next_retry_at")
+
+  webhook       Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, status])
+  @@index([webhookId, eventId])
+  @@index([status, nextRetryAt])
+  @@map("webhook_deliveries")
+}
+
+model Integration {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  type          String   // 'slack', 'discord', 'github', 'zapier', 'make', 'n8n'
+  name          String
+
+  // OAuth credentials (encrypted)
+  accessToken   Bytes?   @map("access_token")
+  refreshToken  Bytes?   @map("refresh_token")
+  tokenExpiresAt DateTime? @map("token_expires_at")
+
+  // Integration-specific config
+  config        Json     @default("{}") // { workspace, channel, repo, etc. }
+  scopes        String[] @default([])
+
+  // Status
+  isEnabled     Boolean  @default(true) @map("is_enabled")
+  isConnected   Boolean  @default(false) @map("is_connected")
+  lastSyncAt    DateTime? @map("last_sync_at")
+  lastError     String?  @map("last_error")
+
+  // Metadata
+  externalId    String?  @map("external_id") // ID in the external system
+  externalName  String?  @map("external_name") // Name in the external system
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([orgId, type, name])
+  @@index([orgId, type])
+  @@index([orgId, isEnabled])
+  @@map("integrations")
+}
+
+model IntegrationEvent {
+  id              String   @id @default(uuid()) @db.Uuid
+  integrationId   String   @map("integration_id") @db.Uuid
+
+  // Event details
+  eventType       String   @map("event_type") // 'sync', 'action', 'notification'
+  action          String   // 'send_message', 'create_issue', 'trigger_workflow', etc.
+
+  // Payload
+  inputPayload    Json?    @map("input_payload")
+  outputPayload   Json?    @map("output_payload")
+
+  // Status
+  status          String   @default("pending") // 'pending', 'success', 'failed'
+  errorMessage    String?  @map("error_message")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  completedAt     DateTime? @map("completed_at")
+
+  @@index([integrationId, createdAt])
+  @@index([integrationId, status])
+  @@map("integration_events")
+}
