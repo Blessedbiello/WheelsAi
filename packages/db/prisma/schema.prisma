@@ -1212,3 +1212,142 @@ model IntegrationEvent {
   @@index([integrationId, status])
   @@map("integration_events")
 }
+
+// ============================================
+// Testing Framework (Phase 4)
+// ============================================
+
+model TestSuite {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  agentId       String   @map("agent_id") @db.Uuid
+  name          String
+  description   String?
+
+  // Test configuration
+  timeout       Int      @default(30000) // Timeout per test in ms
+  retries       Int      @default(0) // Number of retries on failure
+  parallel      Boolean  @default(false) // Run tests in parallel
+
+  // Metadata
+  tags          String[] @default([])
+  isEnabled     Boolean  @default(true) @map("is_enabled")
+
+  // Stats
+  totalTests    Int      @default(0) @map("total_tests")
+  lastRunAt     DateTime? @map("last_run_at")
+  lastStatus    String?   @map("last_status") // 'passed', 'failed', 'partial'
+  passRate      Float?    @map("pass_rate") // Percentage of passing tests
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  testCases     TestCase[]
+  testRuns      TestRun[]
+
+  @@unique([orgId, agentId, name])
+  @@index([orgId, agentId])
+  @@index([orgId, isEnabled])
+  @@map("test_suites")
+}
+
+model TestCase {
+  id            String   @id @default(uuid()) @db.Uuid
+  suiteId       String   @map("suite_id") @db.Uuid
+  name          String
+  description   String?
+
+  // Test input
+  inputType     String   @map("input_type") // 'message', 'conversation', 'api'
+  input         Json     // { messages: [], params: {} } or single message
+
+  // Expected output
+  assertionType String   @map("assertion_type") // 'exact', 'contains', 'regex', 'semantic', 'json_schema', 'function'
+  expected      Json     // Expected value or pattern
+  tolerance     Float?   // For semantic similarity (0-1)
+
+  // Test metadata
+  priority      Int      @default(0) // Higher = run first
+  tags          String[] @default([])
+  isEnabled     Boolean  @default(true) @map("is_enabled")
+
+  // Custom assertions
+  customScript  String?  @map("custom_script") @db.Text // JavaScript assertion function
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  suite         TestSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  results       TestResult[]
+
+  @@unique([suiteId, name])
+  @@index([suiteId, isEnabled])
+  @@map("test_cases")
+}
+
+model TestRun {
+  id            String   @id @default(uuid()) @db.Uuid
+  suiteId       String   @map("suite_id") @db.Uuid
+
+  // Run configuration
+  agentVersion  String?  @map("agent_version") // Version tested
+  deploymentId  String?  @map("deployment_id") @db.Uuid // Which deployment was tested
+
+  // Status
+  status        String   @default("pending") // 'pending', 'running', 'completed', 'failed', 'cancelled'
+  progress      Int      @default(0) // 0-100
+
+  // Results summary
+  totalTests    Int      @default(0) @map("total_tests")
+  passedTests   Int      @default(0) @map("passed_tests")
+  failedTests   Int      @default(0) @map("failed_tests")
+  skippedTests  Int      @default(0) @map("skipped_tests")
+  passRate      Float?   @map("pass_rate")
+
+  // Timing
+  totalDurationMs Int?   @map("total_duration_ms")
+
+  // Trigger info
+  triggeredBy   String?  @map("triggered_by") // 'manual', 'ci', 'scheduled', 'deployment'
+  triggeredById String?  @map("triggered_by_id") @db.Uuid
+
+  startedAt     DateTime? @map("started_at")
+  completedAt   DateTime? @map("completed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  suite         TestSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  results       TestResult[]
+
+  @@index([suiteId, status])
+  @@index([suiteId, createdAt])
+  @@map("test_runs")
+}
+
+model TestResult {
+  id            String   @id @default(uuid()) @db.Uuid
+  runId         String   @map("run_id") @db.Uuid
+  testCaseId    String   @map("test_case_id") @db.Uuid
+
+  // Result
+  status        String   // 'passed', 'failed', 'skipped', 'error'
+  durationMs    Int?     @map("duration_ms")
+
+  // Output
+  actualOutput  Json?    @map("actual_output") // What the agent returned
+  error         String?  // Error message if failed
+
+  // Assertion details
+  assertionResult Json?  @map("assertion_result") // { passed: boolean, details: string, score?: number }
+
+  // Retry info
+  attempt       Int      @default(1)
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  run           TestRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  testCase      TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+
+  @@index([runId, status])
+  @@index([testCaseId])
+  @@map("test_results")
+}

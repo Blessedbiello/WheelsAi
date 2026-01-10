@@ -2255,4 +2255,227 @@ export const integrationsApi = {
     ),
 };
 
+// ============================================
+// Testing Framework API
+// ============================================
+
+export type AssertionType =
+  | "exact"
+  | "contains"
+  | "regex"
+  | "semantic"
+  | "json_schema"
+  | "function";
+
+export type TestRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type TestResultStatus = "passed" | "failed" | "skipped" | "error";
+
+export interface TestSuite {
+  id: string;
+  orgId: string;
+  agentId: string;
+  name: string;
+  description: string | null;
+  timeout: number;
+  retries: number;
+  parallel: boolean;
+  tags: string[];
+  isEnabled: boolean;
+  totalTests: number;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  passRate: number | null;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { testCases: number; testRuns: number };
+}
+
+export interface TestCase {
+  id: string;
+  suiteId: string;
+  name: string;
+  description: string | null;
+  inputType: "message" | "conversation" | "api";
+  input: any;
+  assertionType: AssertionType;
+  expected: any;
+  tolerance: number | null;
+  priority: number;
+  tags: string[];
+  isEnabled: boolean;
+  customScript: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TestRun {
+  id: string;
+  suiteId: string;
+  agentVersion: string | null;
+  deploymentId: string | null;
+  status: TestRunStatus;
+  progress: number;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  skippedTests: number;
+  passRate: number | null;
+  totalDurationMs: number | null;
+  triggeredBy: string | null;
+  triggeredById: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface TestResult {
+  id: string;
+  runId: string;
+  testCaseId: string;
+  status: TestResultStatus;
+  durationMs: number | null;
+  actualOutput: any;
+  error: string | null;
+  assertionResult: {
+    passed: boolean;
+    details: string;
+    score?: number;
+  } | null;
+  attempt: number;
+  createdAt: string;
+  testCase?: { name: string; description: string | null };
+}
+
+export interface TestStats {
+  totalSuites: number;
+  totalTests: number;
+  avgPassRate: number;
+  recentRuns: Array<TestRun & { suite: { name: string } }>;
+}
+
+export interface CreateTestSuiteInput {
+  agentId: string;
+  name: string;
+  description?: string;
+  timeout?: number;
+  retries?: number;
+  parallel?: boolean;
+  tags?: string[];
+}
+
+export interface CreateTestCaseInput {
+  name: string;
+  description?: string;
+  inputType: "message" | "conversation" | "api";
+  input: any;
+  assertionType: AssertionType;
+  expected: any;
+  tolerance?: number;
+  priority?: number;
+  tags?: string[];
+  customScript?: string;
+}
+
+export const testingApi = {
+  // Test Suites
+  getSuites: (params?: { agentId?: string; limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.agentId) searchParams.set("agentId", params.agentId);
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return api<{ success: boolean; data: { suites: TestSuite[]; total: number } }>(
+      `/api/testing/suites${query ? `?${query}` : ""}`
+    );
+  },
+
+  getSuite: (suiteId: string) =>
+    api<{
+      success: boolean;
+      data: TestSuite & { testCases: TestCase[]; testRuns: TestRun[] };
+    }>(`/api/testing/suites/${suiteId}`),
+
+  createSuite: (input: CreateTestSuiteInput) =>
+    api<{ success: boolean; data: TestSuite }>("/api/testing/suites", {
+      method: "POST",
+      body: input,
+    }),
+
+  updateSuite: (suiteId: string, updates: Partial<CreateTestSuiteInput>) =>
+    api<{ success: boolean; data: TestSuite }>(`/api/testing/suites/${suiteId}`, {
+      method: "PATCH",
+      body: updates,
+    }),
+
+  deleteSuite: (suiteId: string) =>
+    api<void>(`/api/testing/suites/${suiteId}`, { method: "DELETE" }),
+
+  // Test Cases
+  getCases: (suiteId: string) =>
+    api<{ success: boolean; data: TestCase[] }>(
+      `/api/testing/suites/${suiteId}/cases`
+    ),
+
+  createCase: (suiteId: string, input: CreateTestCaseInput) =>
+    api<{ success: boolean; data: TestCase }>(
+      `/api/testing/suites/${suiteId}/cases`,
+      { method: "POST", body: input }
+    ),
+
+  updateCase: (suiteId: string, caseId: string, updates: Partial<CreateTestCaseInput>) =>
+    api<{ success: boolean; data: TestCase }>(
+      `/api/testing/suites/${suiteId}/cases/${caseId}`,
+      { method: "PATCH", body: updates }
+    ),
+
+  deleteCase: (suiteId: string, caseId: string) =>
+    api<void>(`/api/testing/suites/${suiteId}/cases/${caseId}`, { method: "DELETE" }),
+
+  toggleCase: (suiteId: string, caseId: string, isEnabled: boolean) =>
+    api<{ success: boolean; data: TestCase }>(
+      `/api/testing/suites/${suiteId}/cases/${caseId}/toggle`,
+      { method: "POST", body: { isEnabled } }
+    ),
+
+  // Test Runs
+  runSuite: (suiteId: string, deploymentId?: string) =>
+    api<{ success: boolean; data: TestRun; message: string }>(
+      `/api/testing/suites/${suiteId}/run`,
+      { method: "POST", body: { deploymentId } }
+    ),
+
+  getRuns: (
+    suiteId: string,
+    params?: { limit?: number; offset?: number; status?: string }
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    if (params?.status) searchParams.set("status", params.status);
+    const query = searchParams.toString();
+    return api<{ success: boolean; data: { runs: TestRun[]; total: number } }>(
+      `/api/testing/suites/${suiteId}/runs${query ? `?${query}` : ""}`
+    );
+  },
+
+  getRun: (suiteId: string, runId: string) =>
+    api<{ success: boolean; data: TestRun & { results: TestResult[] } }>(
+      `/api/testing/suites/${suiteId}/runs/${runId}`
+    ),
+
+  cancelRun: (suiteId: string, runId: string) =>
+    api<{ success: boolean; data: TestRun; message: string }>(
+      `/api/testing/suites/${suiteId}/runs/${runId}/cancel`,
+      { method: "POST" }
+    ),
+
+  // Stats
+  getStats: (agentId?: string) => {
+    const query = agentId ? `?agentId=${agentId}` : "";
+    return api<{ success: boolean; data: TestStats }>(
+      `/api/testing/stats${query}`
+    );
+  },
+};
+
 export { ApiError };
