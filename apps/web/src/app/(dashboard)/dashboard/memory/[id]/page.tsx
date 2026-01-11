@@ -1,0 +1,600 @@
+"use client";
+
+import { useState, useEffect, use } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  Brain,
+  MessageSquare,
+  User,
+  Bot,
+  Settings2,
+  Tag,
+  Clock,
+  Zap,
+  Plus,
+  Trash2,
+  Edit2,
+  Save,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  FileText,
+  AlertCircle,
+} from "lucide-react";
+import {
+  memoryApi,
+  type ConversationDetail,
+  type Message,
+  type MemoryContext,
+  type ContextType,
+} from "@/lib/api";
+
+export default function ConversationDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const resolvedParams = use(params);
+  const router = useRouter();
+  const [conversation, setConversation] = useState<ConversationDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"messages" | "memory">("messages");
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [title, setTitle] = useState("");
+  const [editingSummary, setEditingSummary] = useState(false);
+  const [summary, setSummary] = useState("");
+  const [showAddMemory, setShowAddMemory] = useState(false);
+  const [newMemory, setNewMemory] = useState({
+    key: "",
+    value: "",
+    contextType: "fact" as ContextType,
+    importance: 0.5,
+  });
+
+  useEffect(() => {
+    loadConversation();
+  }, [resolvedParams.id]);
+
+  async function loadConversation() {
+    try {
+      setLoading(true);
+      const data = await memoryApi.getConversation(resolvedParams.id);
+      setConversation(data);
+      setTitle(data.title || "");
+      setSummary(data.summary || "");
+    } catch (error) {
+      console.error("Failed to load conversation:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function updateTitle() {
+    if (!conversation) return;
+    try {
+      const updated = await memoryApi.updateConversation(conversation.id, { title });
+      setConversation({ ...conversation, title: updated.title });
+      setEditingTitle(false);
+    } catch (error) {
+      console.error("Failed to update title:", error);
+    }
+  }
+
+  async function updateSummary() {
+    if (!conversation) return;
+    try {
+      const updated = await memoryApi.summarizeConversation(conversation.id, summary);
+      setConversation({ ...conversation, summary: updated.summary });
+      setEditingSummary(false);
+    } catch (error) {
+      console.error("Failed to update summary:", error);
+    }
+  }
+
+  async function addMemoryContext() {
+    if (!conversation || !newMemory.key || !newMemory.value) return;
+    try {
+      const created = await memoryApi.addMemoryContext(conversation.id, newMemory);
+      setConversation({
+        ...conversation,
+        memoryContexts: [...conversation.memoryContexts, created],
+      });
+      setNewMemory({ key: "", value: "", contextType: "fact", importance: 0.5 });
+      setShowAddMemory(false);
+    } catch (error) {
+      console.error("Failed to add memory context:", error);
+    }
+  }
+
+  async function deleteMemoryContext(contextId: string) {
+    if (!conversation) return;
+    try {
+      await memoryApi.deleteMemoryContext(conversation.id, contextId);
+      setConversation({
+        ...conversation,
+        memoryContexts: conversation.memoryContexts.filter((m) => m.id !== contextId),
+      });
+    } catch (error) {
+      console.error("Failed to delete memory context:", error);
+    }
+  }
+
+  async function toggleActive() {
+    if (!conversation) return;
+    try {
+      const updated = await memoryApi.updateConversation(conversation.id, {
+        isActive: !conversation.isActive,
+      });
+      setConversation({ ...conversation, isActive: updated.isActive });
+    } catch (error) {
+      console.error("Failed to toggle active status:", error);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+      </div>
+    );
+  }
+
+  if (!conversation) {
+    return (
+      <div className="text-center py-12">
+        <AlertCircle className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+        <h2 className="text-lg font-medium text-gray-900">Conversation not found</h2>
+        <button
+          onClick={() => router.push("/dashboard/memory")}
+          className="mt-4 text-primary-600 hover:underline"
+        >
+          Go back to Memory
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => router.push("/dashboard/memory")}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div>
+            {editingTitle ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="text-2xl font-bold text-gray-900 border-b-2 border-primary-500 focus:outline-none bg-transparent"
+                  autoFocus
+                />
+                <button
+                  onClick={updateTitle}
+                  className="p-1 text-green-600 hover:bg-green-50 rounded"
+                >
+                  <Save className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    setTitle(conversation.title || "");
+                    setEditingTitle(false);
+                  }}
+                  className="p-1 text-gray-400 hover:bg-gray-100 rounded"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold text-gray-900">
+                  {conversation.title || `Conversation ${conversation.id.slice(0, 8)}`}
+                </h1>
+                <button
+                  onClick={() => setEditingTitle(true)}
+                  className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                >
+                  <Edit2 className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
+              {conversation.agent && (
+                <span className="flex items-center gap-1">
+                  <Bot className="h-4 w-4" />
+                  {conversation.agent.name}
+                </span>
+              )}
+              <span className="flex items-center gap-1">
+                <MessageSquare className="h-4 w-4" />
+                {conversation.messageCount} messages
+              </span>
+              <span className="flex items-center gap-1">
+                <Zap className="h-4 w-4" />
+                {conversation.totalTokens} tokens
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={toggleActive}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              conversation.isActive
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {conversation.isActive ? "Active" : "Inactive"}
+          </button>
+        </div>
+      </div>
+
+      {/* Summary */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-medium text-gray-900 flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            Summary
+          </h3>
+          {!editingSummary && (
+            <button
+              onClick={() => setEditingSummary(true)}
+              className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+            >
+              <Edit2 className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        {editingSummary ? (
+          <div className="space-y-2">
+            <textarea
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              placeholder="Add a summary of this conversation..."
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setSummary(conversation.summary || "");
+                  setEditingSummary(false);
+                }}
+                className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={updateSummary}
+                className="px-3 py-1.5 text-sm bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-gray-600 text-sm">
+            {conversation.summary || "No summary yet. Click edit to add one."}
+          </p>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <nav className="flex space-x-8">
+          <button
+            onClick={() => setActiveTab("messages")}
+            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === "messages"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            <MessageSquare className="inline h-4 w-4 mr-2" />
+            Messages ({conversation.messages.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("memory")}
+            className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === "memory"
+                ? "border-primary-500 text-primary-600"
+                : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}
+          >
+            <Brain className="inline h-4 w-4 mr-2" />
+            Memory Contexts ({conversation.memoryContexts.length})
+          </button>
+        </nav>
+      </div>
+
+      {/* Messages Tab */}
+      {activeTab === "messages" && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          {conversation.messages.length === 0 ? (
+            <div className="p-12 text-center">
+              <MessageSquare className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No messages</h3>
+              <p className="text-gray-500">This conversation has no messages yet</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {conversation.messages.map((message) => (
+                <MessageItem key={message.id} message={message} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Memory Tab */}
+      {activeTab === "memory" && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button
+              onClick={() => setShowAddMemory(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              Add Memory
+            </button>
+          </div>
+
+          {/* Add Memory Form */}
+          {showAddMemory && (
+            <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
+              <h3 className="font-medium text-gray-900">Add Memory Context</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Key
+                  </label>
+                  <input
+                    type="text"
+                    value={newMemory.key}
+                    onChange={(e) => setNewMemory({ ...newMemory, key: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                    placeholder="e.g., user_name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Type
+                  </label>
+                  <select
+                    value={newMemory.contextType}
+                    onChange={(e) =>
+                      setNewMemory({ ...newMemory, contextType: e.target.value as ContextType })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="fact">Fact</option>
+                    <option value="preference">Preference</option>
+                    <option value="summary">Summary</option>
+                    <option value="entity">Entity</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Value
+                </label>
+                <textarea
+                  value={newMemory.value}
+                  onChange={(e) => setNewMemory({ ...newMemory, value: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
+                  placeholder="The memory content..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Importance: {newMemory.importance}
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={newMemory.importance}
+                  onChange={(e) =>
+                    setNewMemory({ ...newMemory, importance: parseFloat(e.target.value) })
+                  }
+                  className="w-full"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowAddMemory(false)}
+                  className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={addMemoryContext}
+                  disabled={!newMemory.key || !newMemory.value}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add Memory
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Memory List */}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            {conversation.memoryContexts.length === 0 ? (
+              <div className="p-12 text-center">
+                <Brain className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No memory contexts
+                </h3>
+                <p className="text-gray-500">
+                  Add memory contexts to help your agent remember important information
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200">
+                {conversation.memoryContexts.map((context) => (
+                  <MemoryContextItem
+                    key={context.id}
+                    context={context}
+                    onDelete={() => deleteMemoryContext(context.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MessageItem({ message }: { message: Message }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = message.content.length > 500;
+
+  const roleConfig = {
+    user: {
+      icon: User,
+      bg: "bg-blue-50",
+      iconBg: "bg-blue-100",
+      iconColor: "text-blue-600",
+    },
+    assistant: {
+      icon: Bot,
+      bg: "bg-gray-50",
+      iconBg: "bg-primary-100",
+      iconColor: "text-primary-600",
+    },
+    system: {
+      icon: Settings2,
+      bg: "bg-yellow-50",
+      iconBg: "bg-yellow-100",
+      iconColor: "text-yellow-600",
+    },
+    function: {
+      icon: Sparkles,
+      bg: "bg-purple-50",
+      iconBg: "bg-purple-100",
+      iconColor: "text-purple-600",
+    },
+  };
+
+  const config = roleConfig[message.role] || roleConfig.user;
+  const Icon = config.icon;
+
+  return (
+    <div className={`px-6 py-4 ${config.bg}`}>
+      <div className="flex gap-3">
+        <div className={`p-2 rounded-lg ${config.iconBg} h-fit`}>
+          <Icon className={`h-4 w-4 ${config.iconColor}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-medium text-gray-900 capitalize">{message.role}</span>
+            {message.functionName && (
+              <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
+                {message.functionName}
+              </span>
+            )}
+            <span className="text-xs text-gray-500">
+              {new Date(message.createdAt).toLocaleString()}
+            </span>
+            {message.tokens && (
+              <span className="text-xs text-gray-400">{message.tokens} tokens</span>
+            )}
+          </div>
+          <div className="text-sm text-gray-700 whitespace-pre-wrap">
+            {isLong && !expanded ? (
+              <>
+                {message.content.slice(0, 500)}...
+                <button
+                  onClick={() => setExpanded(true)}
+                  className="text-primary-600 hover:underline ml-1"
+                >
+                  Show more
+                </button>
+              </>
+            ) : (
+              <>
+                {message.content}
+                {isLong && (
+                  <button
+                    onClick={() => setExpanded(false)}
+                    className="text-primary-600 hover:underline ml-1"
+                  >
+                    Show less
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MemoryContextItem({
+  context,
+  onDelete,
+}: {
+  context: MemoryContext;
+  onDelete: () => void;
+}) {
+  const typeColors: Record<string, string> = {
+    fact: "bg-blue-100 text-blue-700",
+    preference: "bg-green-100 text-green-700",
+    summary: "bg-yellow-100 text-yellow-700",
+    entity: "bg-purple-100 text-purple-700",
+    custom: "bg-gray-100 text-gray-700",
+  };
+
+  return (
+    <div className="px-6 py-4 hover:bg-gray-50 transition-colors">
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="font-medium text-gray-900">{context.key}</span>
+            <span
+              className={`text-xs px-2 py-0.5 rounded ${typeColors[context.contextType] || typeColors.custom}`}
+            >
+              {context.contextType}
+            </span>
+            <span className="text-xs text-gray-400">
+              Importance: {(context.importance * 100).toFixed(0)}%
+            </span>
+          </div>
+          <p className="text-sm text-gray-600">{context.value}</p>
+          <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+            <span>Accessed {context.accessCount} times</span>
+            <span>Last: {new Date(context.lastAccessedAt).toLocaleDateString()}</span>
+            {context.expiresAt && (
+              <span className="text-yellow-600">
+                Expires: {new Date(context.expiresAt).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={onDelete}
+          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}

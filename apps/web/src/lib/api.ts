@@ -2478,4 +2478,272 @@ export const testingApi = {
   },
 };
 
+// ============================================
+// Conversation Memory API
+// ============================================
+
+export type MessageRole = "user" | "assistant" | "system" | "function";
+export type ContextType = "fact" | "preference" | "summary" | "entity" | "custom";
+
+export interface Conversation {
+  id: string;
+  userId: string;
+  agentId: string;
+  deploymentId: string | null;
+  externalId: string | null;
+  title: string | null;
+  summary: string | null;
+  isActive: boolean;
+  messageCount: number;
+  totalTokens: number;
+  metadata: Record<string, any> | null;
+  lastMessageAt: string;
+  createdAt: string;
+  updatedAt: string;
+  agent?: { id: string; name: string };
+  deployment?: { id: string; name: string };
+  _count?: { messages: number; memoryContexts: number };
+}
+
+export interface ConversationDetail extends Conversation {
+  agent?: { id: string; name: string; systemPrompt: string | null };
+  messages: Message[];
+  memoryContexts: MemoryContext[];
+}
+
+export interface Message {
+  id: string;
+  conversationId: string;
+  role: MessageRole;
+  content: string;
+  functionName: string | null;
+  functionArgs: Record<string, any> | null;
+  metadata: Record<string, any> | null;
+  tokens: number | null;
+  createdAt: string;
+}
+
+export interface MemoryContext {
+  id: string;
+  conversationId: string;
+  key: string;
+  value: string;
+  contextType: ContextType;
+  importance: number;
+  accessCount: number;
+  expiresAt: string | null;
+  metadata: Record<string, any> | null;
+  lastAccessedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationStats {
+  totalConversations: number;
+  activeConversations: number;
+  totalMessages: number;
+  totalTokens: number;
+  avgMessagesPerConversation: number;
+  totalMemoryContexts: number;
+}
+
+export interface RelevantMemory {
+  systemPrompt: string | null;
+  summary: string | null;
+  recentMessages: Message[];
+  memoryContexts: MemoryContext[];
+}
+
+export interface CreateConversationInput {
+  agentId: string;
+  deploymentId?: string;
+  externalId?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface AddMessageInput {
+  role: MessageRole;
+  content: string;
+  functionName?: string;
+  functionArgs?: Record<string, any>;
+  metadata?: Record<string, any>;
+  tokens?: number;
+}
+
+export interface CreateMemoryContextInput {
+  key: string;
+  value: string;
+  contextType: ContextType;
+  importance?: number;
+  expiresAt?: string;
+  metadata?: Record<string, any>;
+}
+
+export const memoryApi = {
+  // Stats
+  getStats: (agentId?: string) => {
+    const query = agentId ? `?agentId=${agentId}` : "";
+    return api<ConversationStats>(`/api/memory/stats${query}`);
+  },
+
+  // Conversations
+  getConversations: (params?: {
+    agentId?: string;
+    deploymentId?: string;
+    isActive?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.agentId) searchParams.set("agentId", params.agentId);
+    if (params?.deploymentId) searchParams.set("deploymentId", params.deploymentId);
+    if (params?.isActive !== undefined) searchParams.set("isActive", params.isActive.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return api<{ conversations: Conversation[]; total: number; limit: number; offset: number }>(
+      `/api/memory/conversations${query ? `?${query}` : ""}`
+    );
+  },
+
+  createConversation: (input: CreateConversationInput) =>
+    api<Conversation>("/api/memory/conversations", {
+      method: "POST",
+      body: input,
+    }),
+
+  getConversation: (conversationId: string) =>
+    api<ConversationDetail>(`/api/memory/conversations/${conversationId}`),
+
+  getConversationByExternalId: (externalId: string) =>
+    api<Conversation>(`/api/memory/conversations/external/${externalId}`),
+
+  updateConversation: (
+    conversationId: string,
+    updates: {
+      title?: string;
+      summary?: string;
+      isActive?: boolean;
+      metadata?: Record<string, any>;
+    }
+  ) =>
+    api<Conversation>(`/api/memory/conversations/${conversationId}`, {
+      method: "PATCH",
+      body: updates,
+    }),
+
+  deleteConversation: (conversationId: string) =>
+    api<{ success: boolean }>(`/api/memory/conversations/${conversationId}`, {
+      method: "DELETE",
+    }),
+
+  // Messages
+  getMessages: (
+    conversationId: string,
+    params?: { limit?: number; before?: string; after?: string }
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.before) searchParams.set("before", params.before);
+    if (params?.after) searchParams.set("after", params.after);
+    const query = searchParams.toString();
+    return api<Message[]>(
+      `/api/memory/conversations/${conversationId}/messages${query ? `?${query}` : ""}`
+    );
+  },
+
+  addMessage: (conversationId: string, input: AddMessageInput) =>
+    api<Message>(`/api/memory/conversations/${conversationId}/messages`, {
+      method: "POST",
+      body: input,
+    }),
+
+  deleteMessage: (conversationId: string, messageId: string) =>
+    api<{ success: boolean }>(
+      `/api/memory/conversations/${conversationId}/messages/${messageId}`,
+      { method: "DELETE" }
+    ),
+
+  // Memory Contexts
+  getMemoryContexts: (
+    conversationId: string,
+    params?: { contextTypes?: string; minImportance?: number; limit?: number }
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (params?.contextTypes) searchParams.set("contextTypes", params.contextTypes);
+    if (params?.minImportance !== undefined)
+      searchParams.set("minImportance", params.minImportance.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return api<MemoryContext[]>(
+      `/api/memory/conversations/${conversationId}/memory${query ? `?${query}` : ""}`
+    );
+  },
+
+  addMemoryContext: (conversationId: string, input: CreateMemoryContextInput) =>
+    api<MemoryContext>(`/api/memory/conversations/${conversationId}/memory`, {
+      method: "POST",
+      body: input,
+    }),
+
+  updateMemoryContext: (
+    conversationId: string,
+    contextId: string,
+    updates: {
+      value?: string;
+      importance?: number;
+      expiresAt?: string | null;
+      metadata?: Record<string, any>;
+    }
+  ) =>
+    api<MemoryContext>(
+      `/api/memory/conversations/${conversationId}/memory/${contextId}`,
+      { method: "PATCH", body: updates }
+    ),
+
+  deleteMemoryContext: (conversationId: string, contextId: string) =>
+    api<{ success: boolean }>(
+      `/api/memory/conversations/${conversationId}/memory/${contextId}`,
+      { method: "DELETE" }
+    ),
+
+  // Context retrieval for inference
+  getRelevantMemory: (
+    conversationId: string,
+    params?: { contextTypes?: string; minImportance?: number; limit?: number }
+  ) => {
+    const searchParams = new URLSearchParams();
+    if (params?.contextTypes) searchParams.set("contextTypes", params.contextTypes);
+    if (params?.minImportance !== undefined)
+      searchParams.set("minImportance", params.minImportance.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    const query = searchParams.toString();
+    return api<RelevantMemory>(
+      `/api/memory/conversations/${conversationId}/context${query ? `?${query}` : ""}`
+    );
+  },
+
+  // Summarization
+  summarizeConversation: (conversationId: string, summary: string) =>
+    api<Conversation>(`/api/memory/conversations/${conversationId}/summarize`, {
+      method: "POST",
+      body: { summary },
+    }),
+
+  // Fact extraction
+  extractFacts: (
+    conversationId: string,
+    facts: Array<{
+      key: string;
+      value: string;
+      contextType: "fact" | "preference" | "entity";
+      importance?: number;
+    }>
+  ) =>
+    api<MemoryContext[]>(`/api/memory/conversations/${conversationId}/extract`, {
+      method: "POST",
+      body: { facts },
+    }),
+};
+
 export { ApiError };
