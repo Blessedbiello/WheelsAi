@@ -27,6 +27,7 @@ import { versioningRoutes } from "./routes/versioning.js";
 import { webhooksRoutes } from "./routes/webhooks.js";
 import { testingRoutes } from "./routes/testing.js";
 import { memoryRoutes } from "./routes/memory.js";
+import { domainsRoutes } from "./routes/domains.js";
 
 async function main() {
   const app = Fastify({
@@ -73,6 +74,7 @@ async function main() {
   await app.register(webhooksRoutes, { prefix: "/api" });
   await app.register(testingRoutes, { prefix: "/api/testing" });
   await app.register(memoryRoutes, { prefix: "/api/memory" });
+  await app.register(domainsRoutes, { prefix: "/api/domains" });
   await app.register(inferenceRoutes); // OpenAI-compatible API at /v1/*
 
   // Global error handler

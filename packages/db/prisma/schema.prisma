@@ -1351,3 +1351,187 @@ model TestResult {
   @@index([testCaseId])
   @@map("test_results")
 }
+
+// ============================================
+// Conversation Memory (Phase 4)
+// ============================================
+
+model Conversation {
+  id            String   @id @default(uuid()) @db.Uuid
+  orgId         String   @map("org_id") @db.Uuid
+  agentId       String?  @map("agent_id") @db.Uuid
+  deploymentId  String?  @map("deployment_id") @db.Uuid
+
+  // Session info
+  sessionId     String   @map("session_id") // External session identifier
+  userId        String?  @map("user_id") // External user identifier
+
+  // Metadata
+  title         String?  // Auto-generated or manual title
+  tags          String[] @default([])
+  metadata      Json?    // Custom metadata
+
+  // Status
+  status        String   @default("active") // 'active', 'archived', 'deleted'
+  messageCount  Int      @default(0) @map("message_count")
+  tokenCount    Int      @default(0) @map("token_count")
+
+  // Timestamps
+  lastMessageAt DateTime? @map("last_message_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  messages      Message[]
+  memories      MemoryContext[]
+
+  @@unique([orgId, sessionId])
+  @@index([orgId, agentId])
+  @@index([orgId, status])
+  @@index([orgId, lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id              String   @id @default(uuid()) @db.Uuid
+  conversationId  String   @map("conversation_id") @db.Uuid
+
+  // Message content
+  role            String   // 'user', 'assistant', 'system', 'function', 'tool'
+  content         String   @db.Text
+  name            String?  // For function/tool messages
+
+  // Function/tool calls
+  functionCall    Json?    @map("function_call") // { name, arguments }
+  toolCalls       Json?    @map("tool_calls") // Array of tool calls
+  toolCallId      String?  @map("tool_call_id") // For tool responses
+
+  // Metadata
+  tokens          Int      @default(0) // Token count for this message
+  metadata        Json?    // Custom metadata (latency, model used, etc.)
+
+  // Ordering
+  sequenceNum     Int      @map("sequence_num")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, sequenceNum])
+  @@index([conversationId, role])
+  @@map("messages")
+}
+
+model MemoryContext {
+  id              String   @id @default(uuid()) @db.Uuid
+  conversationId  String   @map("conversation_id") @db.Uuid
+
+  // Memory type
+  type            String   // 'summary', 'fact', 'preference', 'entity', 'custom'
+  key             String?  // Key for key-value memories
+
+  // Content
+  content         String   @db.Text // The actual memory content
+  embedding       Bytes?   // Vector embedding for semantic search
+
+  // Importance and decay
+  importance      Float    @default(0.5) // 0-1 importance score
+  accessCount     Int      @default(0) @map("access_count")
+  lastAccessedAt  DateTime? @map("last_accessed_at")
+
+  // Source tracking
+  sourceMessageId String?  @map("source_message_id") @db.Uuid
+  sourceRange     Json?    @map("source_range") // { start: sequenceNum, end: sequenceNum }
+
+  // Status
+  isActive        Boolean  @default(true) @map("is_active")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, type])
+  @@index([conversationId, isActive])
+  @@index([conversationId, importance])
+  @@map("memory_contexts")
+}
+
+// ============================================
+// Custom Domains (Phase 4)
+// ============================================
+
+model CustomDomain {
+  id              String   @id @default(uuid()) @db.Uuid
+  orgId           String   @map("org_id") @db.Uuid
+
+  // Domain configuration
+  domain          String   @unique // e.g., "api.example.com"
+  subdomain       String?  // Optional subdomain
+  rootDomain      String   @map("root_domain") // e.g., "example.com"
+
+  // Target resource
+  targetType      String   @map("target_type") // 'agent', 'deployment'
+  targetId        String   @map("target_id") @db.Uuid
+
+  // DNS verification
+  verificationStatus String @default("pending") @map("verification_status") // 'pending', 'verified', 'failed', 'expired'
+  verificationToken String @unique @map("verification_token") // DNS TXT record value
+  verificationMethod String @default("dns_txt") @map("verification_method") // 'dns_txt', 'dns_cname', 'http'
+  verifiedAt      DateTime? @map("verified_at")
+  lastCheckedAt   DateTime? @map("last_checked_at")
+  verificationError String? @map("verification_error")
+
+  // SSL certificate
+  sslStatus       String   @default("pending") @map("ssl_status") // 'pending', 'provisioning', 'active', 'failed', 'expired'
+  sslProvider     String?  @map("ssl_provider") // 'lets_encrypt', 'custom'
+  sslExpiresAt    DateTime? @map("ssl_expires_at")
+  sslError        String?  @map("ssl_error")
+
+  // Custom SSL (for custom certificates)
+  customCert      Bytes?   @map("custom_cert") // Encrypted
+  customKey       Bytes?   @map("custom_key") // Encrypted
+  customCertChain Bytes?   @map("custom_cert_chain") // Encrypted
+
+  // Routing configuration
+  routingMode     String   @default("proxy") @map("routing_mode") // 'proxy', 'redirect'
+  forceHttps      Boolean  @default(true) @map("force_https")
+  headers         Json?    // Custom headers to add
+
+  // Status
+  isActive        Boolean  @default(false) @map("is_active")
+  isPrimary       Boolean  @default(false) @map("is_primary") // Primary domain for the target
+
+  // Analytics
+  totalRequests   BigInt   @default(0) @map("total_requests")
+  lastRequestAt   DateTime? @map("last_request_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([orgId, domain])
+  @@index([orgId, targetType, targetId])
+  @@index([verificationStatus])
+  @@index([sslStatus])
+  @@index([isActive])
+  @@map("custom_domains")
+}
+
+model DomainEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  domainId      String   @map("domain_id") @db.Uuid
+
+  // Event details
+  eventType     String   @map("event_type") // 'verification_started', 'verification_success', 'verification_failed', 'ssl_provisioned', 'ssl_renewed', 'ssl_failed', 'activated', 'deactivated'
+  message       String?
+  details       Json?    // Additional event details
+
+  // Status at time of event
+  previousStatus String?  @map("previous_status")
+  newStatus     String?  @map("new_status")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([domainId, createdAt])
+  @@index([domainId, eventType])
+  @@map("domain_events")
+}

@@ -2746,4 +2746,200 @@ export const memoryApi = {
     }),
 };
 
+// ============================================
+// Custom Domains API
+// ============================================
+
+export type VerificationStatus = "pending" | "verified" | "failed" | "expired";
+export type SslStatus = "pending" | "provisioning" | "active" | "failed" | "expired";
+
+export interface CustomDomain {
+  id: string;
+  orgId: string;
+  domain: string;
+  subdomain: string | null;
+  rootDomain: string;
+  targetType: "agent" | "deployment";
+  targetId: string;
+  verificationStatus: VerificationStatus;
+  verificationToken: string;
+  verificationMethod: string;
+  verifiedAt: string | null;
+  lastCheckedAt: string | null;
+  verificationError: string | null;
+  sslStatus: SslStatus;
+  sslProvider: string | null;
+  sslExpiresAt: string | null;
+  sslError: string | null;
+  routingMode: string;
+  forceHttps: boolean;
+  headers: Record<string, string> | null;
+  isActive: boolean;
+  isPrimary: boolean;
+  totalRequests: number;
+  lastRequestAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DnsRecords {
+  txtRecord: {
+    name: string;
+    type: string;
+    value: string;
+  };
+  cnameRecord: {
+    name: string;
+    type: string;
+    value: string;
+  };
+}
+
+export interface CustomDomainWithDns extends CustomDomain {
+  dnsRecords: DnsRecords;
+}
+
+export interface DomainEvent {
+  id: string;
+  domainId: string;
+  eventType: string;
+  message: string | null;
+  details: Record<string, any> | null;
+  previousStatus: string | null;
+  newStatus: string | null;
+  createdAt: string;
+}
+
+export interface DomainStats {
+  total: number;
+  verified: number;
+  active: number;
+  pending: number;
+  sslExpiringSoon: number;
+}
+
+export interface SslStatusInfo {
+  sslStatus: SslStatus;
+  sslProvider: string | null;
+  sslExpiresAt: string | null;
+  sslError: string | null;
+  needsRenewal: boolean;
+}
+
+export interface CreateDomainInput {
+  domain: string;
+  targetType: "agent" | "deployment";
+  targetId: string;
+  forceHttps?: boolean;
+  headers?: Record<string, string>;
+}
+
+export const domainsApi = {
+  // Stats
+  getStats: () =>
+    api<{ success: boolean; data: DomainStats }>("/api/domains/stats"),
+
+  // List domains
+  getDomains: (params?: {
+    targetType?: string;
+    targetId?: string;
+    isActive?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.targetType) searchParams.set("targetType", params.targetType);
+    if (params?.targetId) searchParams.set("targetId", params.targetId);
+    if (params?.isActive !== undefined) searchParams.set("isActive", params.isActive.toString());
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return api<{
+      success: boolean;
+      data: { domains: CustomDomain[]; total: number; limit: number; offset: number };
+    }>(`/api/domains${query ? `?${query}` : ""}`);
+  },
+
+  // Create domain
+  createDomain: (input: CreateDomainInput) =>
+    api<{ success: boolean; data: CustomDomainWithDns; message: string }>("/api/domains", {
+      method: "POST",
+      body: input,
+    }),
+
+  // Get domain
+  getDomain: (domainId: string) =>
+    api<{ success: boolean; data: CustomDomainWithDns }>(`/api/domains/${domainId}`),
+
+  // Update domain
+  updateDomain: (
+    domainId: string,
+    updates: {
+      forceHttps?: boolean;
+      headers?: Record<string, string>;
+      isPrimary?: boolean;
+    }
+  ) =>
+    api<{ success: boolean; data: CustomDomain; message: string }>(`/api/domains/${domainId}`, {
+      method: "PATCH",
+      body: updates,
+    }),
+
+  // Delete domain
+  deleteDomain: (domainId: string) =>
+    api<{ success: boolean; message: string }>(`/api/domains/${domainId}`, {
+      method: "DELETE",
+    }),
+
+  // Verify domain
+  verifyDomain: (domainId: string) =>
+    api<{
+      success: boolean;
+      data: {
+        verified: boolean;
+        domain?: CustomDomain;
+        message?: string;
+        error?: string;
+        dnsRecords?: DnsRecords;
+      };
+    }>(`/api/domains/${domainId}/verify`, { method: "POST" }),
+
+  // Re-verify domain (get new token)
+  reverifyDomain: (domainId: string) =>
+    api<{
+      success: boolean;
+      data: { domain: CustomDomain; dnsRecords: DnsRecords };
+      message: string;
+    }>(`/api/domains/${domainId}/reverify`, { method: "POST" }),
+
+  // Toggle domain active status
+  toggleDomain: (domainId: string, isActive: boolean) =>
+    api<{ success: boolean; data: CustomDomain; message: string }>(
+      `/api/domains/${domainId}/toggle`,
+      { method: "POST", body: { isActive } }
+    ),
+
+  // Get SSL status
+  getSslStatus: (domainId: string) =>
+    api<{ success: boolean; data: SslStatusInfo }>(`/api/domains/${domainId}/ssl`),
+
+  // Renew SSL
+  renewSsl: (domainId: string) =>
+    api<{ success: boolean; data: { message: string } }>(`/api/domains/${domainId}/ssl/renew`, {
+      method: "POST",
+    }),
+
+  // Get domain events
+  getDomainEvents: (domainId: string, params?: { limit?: number; offset?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    const query = searchParams.toString();
+    return api<{
+      success: boolean;
+      data: { events: DomainEvent[]; total: number; limit: number; offset: number };
+    }>(`/api/domains/${domainId}/events${query ? `?${query}` : ""}`);
+  },
+};
+
 export { ApiError };
